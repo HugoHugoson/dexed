@@ -39,7 +39,7 @@ type
     procedure terminateClient; inline;
     procedure waitClient; inline;
     procedure updateServerlistening;
-    procedure writeSourceToInput; inline;
+    procedure writeSourceToInput; {$IFNDEF DEBUG}inline;{$ENDIF}
     function checkDcdSocket: boolean;
     function getIfLaunched: boolean;
     //
@@ -359,7 +359,7 @@ end;
 
 procedure TCEDcdWrapper.writeSourceToInput;
 begin
-  fInputSource := fDoc.Text;
+  fInputSource := fDoc.Strings.TextString_UTF8;
   fClient.Input.Write(fInputSource[1], fInputSource.length);
   fClient.CloseInput;
 end;
@@ -410,7 +410,7 @@ begin
   //
   fClient.Parameters.Clear;
   fClient.Parameters.Add('-c');
-  fClient.Parameters.Add(intToStr(fDoc.SelStart - 1));
+  fClient.Parameters.Add(intToStr(fDoc.caretBytePosition));
   fClient.Execute;
   writeSourceToInput;
   //
@@ -462,7 +462,7 @@ begin
   //
   fClient.Parameters.Clear;
   fClient.Parameters.Add('-c');
-  fClient.Parameters.Add(intToStr(fDoc.SelStart - 1));
+  fClient.Parameters.Add(intToStr(fDoc.caretBytePosition));
   fClient.Execute;
   writeSourceToInput;
   //
@@ -573,7 +573,7 @@ begin
   fClient.Parameters.Clear;
   fClient.Parameters.Add('-l');
   fClient.Parameters.Add('-c');
-  fClient.Parameters.Add(intToStr(fDoc.SelStart - 1));
+  fClient.Parameters.Add(intToStr(fDoc.caretBytePosition));
   fClient.Execute;
   writeSourceToInput;
   //
@@ -611,7 +611,7 @@ begin
   fClient.Parameters.Clear;
   fClient.Parameters.Add('-u');
   fClient.Parameters.Add('-c');
-  fClient.Parameters.Add(intToStr(fDoc.SelStart - 1));
+  fClient.Parameters.Add(intToStr(fDoc.caretBytePosition));
   fClient.Execute;
   writeSourceToInput;
   //

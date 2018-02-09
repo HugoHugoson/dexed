@@ -257,7 +257,7 @@ begin
   if not assigned(fMsgs) then
     fMSgs := getMessageDisplay;
 
-  getHalsteadMetrics(document.Lines, jsn);
+  //getHalsteadMetrics(document.Strings, jsn);
   if jsn.isNil then
     exit;
 

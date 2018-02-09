@@ -22,7 +22,7 @@ procedure getModulesImports(const files: string; results: TStrings);
 
 procedure getHalsteadMetrics(source: TStrings; out jsn: TJSONObject);
 
-procedure getDdocTemplate(source, res: TStrings;caretLine: integer; plusComment: boolean);
+procedure getDdocTemplate(const source: string; res: TStrings;caretLine: integer; plusComment: boolean);
 
 implementation
 
@@ -127,7 +127,7 @@ begin
   end;
 end;
 
-procedure getDdocTemplate(source, res: TStrings; caretLine: integer; plusComment: boolean);
+procedure getDdocTemplate(const source: string; res: TStrings; caretLine: integer; plusComment: boolean);
 var
   prc: TProcess;
   str: string;
@@ -145,8 +145,7 @@ begin
     prc.Options := [poUsePipes {$IFDEF WINDOWS}, poNewConsole{$ENDIF}];
     prc.ShowWindow := swoHIDE;
     prc.Execute;
-    str := source.Text;
-    prc.Input.Write(str[1], str.length);
+    prc.Input.Write(source[1], source.length);
     prc.CloseInput;
     processOutputToStrings(prc, res);
   finally

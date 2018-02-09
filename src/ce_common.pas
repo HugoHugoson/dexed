@@ -26,7 +26,7 @@ const
 
 type
 
-  TIndentationMode = (imSpaces, imTabs);
+  TIndentationMode = (imNone, imSpaces, imTabs, imMixed);
 
   THasMain = (mainNo, mainYes, mainDefaultBehavior);
 
@@ -298,16 +298,6 @@ type
    * Limitation: Windows style, negation of set not handled [!a-z] [!abc]
    *)
   function globToReg(const glob: string ): string;
-
-  (**
-   * Detects the main indentation mode used in a file
-   *)
-  function indentationMode(strings: TStrings): TIndentationMode;
-
-  (**
-   * Detects the main indentation mode used in a file
-   *)
-  function indentationMode(const fname: string): TIndentationMode;
 
   (**
    * Removes duplicate items in strings
@@ -1320,41 +1310,6 @@ begin
       else
         quote(result, glob[i]);
     end;
-  end;
-end;
-
-function indentationMode(strings: TStrings): TIndentationMode;
-var
-  i: integer;
-  s: string;
-  tabs: integer = 0;
-  spcs: integer = 0;
-begin
-  for s in strings do
-    for i := 1 to s.length do
-    begin
-      case s[i] of
-        #9: tabs += 1;
-        ' ': spcs += 1;
-        else break;
-      end;
-    end;
-  if spcs >= tabs then
-    result := imSpaces
-  else
-    result := imTabs;
-end;
-
-function indentationMode(const fname: string): TIndentationMode;
-var
-  str: TStringList;
-begin
-  str := TStringList.Create;
-  try
-    str.LoadFromFile(fname);
-    result := indentationMode(str);
-  finally
-    str.Free;
   end;
 end;
 

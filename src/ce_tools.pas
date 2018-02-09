@@ -424,12 +424,12 @@ begin
     and (poUsePipes in tool.options) and tool.fProcess.Input.isNotNil then
   begin
     case tool.pipeInputKind of
-      pikEditor:    txt := fDoc.Text;
-      pikLine:      txt := fDoc.LineText;
-      pikSelection: txt := fDoc.SelText;
+      pikEditor:    txt := fDoc.Strings.TextString_UTF8;
+      pikLine:      txt := fDoc.lineTextAtCarret();
+      pikSelection: txt := fDoc.selTextUTF8;
     end;
     if txt.isNotEmpty then
-      tool.fProcess.Input.Write(txt[1], txt.length);
+       tool.fProcess.Input.Write(txt[1], txt.length);
     tool.fProcess.CloseInput;
   end;
 end;

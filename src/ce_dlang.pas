@@ -136,7 +136,7 @@ operator enumerator(list: TLexErrorList): TLexErrorEnumerator;
 (**
  * Lexes text and fills list with the TLexToken found.
  *)
-procedure lex(const text: string; list: TLexTokenList; clbck: TLexFoundEvent = nil; Options: TLexOptions = []);
+procedure lex(const src: string; list: TLexTokenList; clbck: TLexFoundEvent = nil; Options: TLexOptions = []);
 
 (**
  * Outputs the module name from a tokenized D source.
@@ -279,7 +279,7 @@ begin
 end;
 
 
-procedure lex(const text: string; list: TLexTokenList; clbck: TLexFoundEvent = nil; Options: TLexOptions = []);
+procedure lex(const src: string; list: TLexTokenList; clbck: TLexFoundEvent = nil; Options: TLexOptions = []);
 var
   reader: TReaderHead;
   identifier: string;
@@ -302,11 +302,12 @@ var
     ptk^.offset := reader.savedOffset;
     ptk^.Data := identifier;
     list.Add(ptk);
+    identifier := '';
   end;
 
   function isOutOfBound: boolean;
   begin
-    result := reader.AbsoluteIndex >= length(text);
+    result := reader.AbsoluteIndex >= length(src);
     if result and (identifier <> '') then
       addToken(ltkIllegal);
   end;
@@ -320,11 +321,11 @@ var
 
 begin
 
-  if text = '' then exit;
+  if src = '' then exit;
 
   noComment := lxoNoComments in Options;
 
-  reader.Create(@text[1], Point(0, 0));
+  reader.Create(@src[1], Point(0, 0));
   while (True) do
   begin
 

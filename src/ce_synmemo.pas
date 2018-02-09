@@ -8,8 +8,8 @@ uses
   Classes, SysUtils, controls,lcltype, Forms, graphics, ExtCtrls, crc, process,
   SynEdit, SynPluginSyncroEdit, SynCompletion, SynEditKeyCmds, LazSynEditText,
   SynHighlighterLFM, SynEditHighlighter, SynEditMouseCmds, SynEditFoldedView,
-  SynEditMarks, SynEditTypes, SynHighlighterJScript, SynBeautifier, dialogs,
-  md5,
+  SynEditMarks, SynEditTypes, SynHighlighterJScript, SynBeautifier, dialogs, math,
+  md5, ATSynEdit, ATSynEdit_Carets, ATStrings, ATStringProc, ATSynEdit_Commands,
   //SynEditMarkupFoldColoring,
   Clipbrd, fpjson, jsonparser, LazUTF8, LazUTF8Classes, Buttons, StdCtrls,
   ce_common, ce_writableComponent, ce_d2syn, ce_txtsyn, ce_dialogs, ce_dastworx,
@@ -104,9 +104,9 @@ type
     fPos: Integer;
     fMax: Integer;
     fList: TFPList;
-    fMemo: TCustomSynEdit;
+    fMemo: TCESynMemo;
   public
-    constructor create(memo: TCustomSynEdit);
+    constructor create(memo: TCESynMemo);
     destructor destroy; override;
     procedure store;
     procedure back;
@@ -166,13 +166,12 @@ type
     procedure goToLine(value: integer);
   end;
 
-  TCESynMemo = class(TSynEdit, ICEDebugObserver)
+  TCESynMemo = class(TATSynEdit, ICEDebugObserver)
   private
     //fIndentGuideMarkup: TSynEditMarkupFoldColors;
     fScrollMemo: TCEScrollMemo;
     fFilename: string;
     fDastWorxExename: string;
-    fModified: boolean;
     fFileDate: double;
     fCacheLoaded: boolean;
     fIsDSource: boolean;
@@ -236,7 +235,9 @@ type
     procedure setGutterTransparent(value: boolean);
     procedure decCallTipsLvl;
     procedure setMatchOpts(value: TIdentifierMatchOptions);
-    function getMouseBytePosition: Integer;
+    function getMouseBytePosition: integer;
+    function getCaretBytePosition: integer;
+    procedure setCaretBytePosition(value: integer);
     procedure changeNotify(Sender: TObject);
     procedure highlightCurrentIdentifier;
     procedure saveCache;
@@ -276,6 +277,12 @@ type
     procedure addGutterIcon(line: integer; value: TGutterIcon);
     procedure removeGutterIcon(line: integer; value: TGutterIcon);
     procedure patchClipboardIndentation;
+    function getCaretX: integer;
+    function getCaretY: integer;
+    function getCaretXY: TPoint;
+    procedure setCaretX(value: integer);
+    procedure setCaretY(value: integer);
+    procedure setCaretXY(value: TPoint);
     //
     procedure gutterClick(Sender: TObject; X, Y, Line: integer; mark: TSynEditMark);
     procedure removeDebugTimeMarks;
@@ -291,11 +298,9 @@ type
   protected
     procedure DoEnter; override;
     procedure DoExit; override;
-    procedure DoOnProcessCommand(var Command: TSynEditorCommand; var AChar: TUTF8Char;
-      Data: pointer); override;
     procedure MouseLeave; override;
     procedure SetVisible(Value: Boolean); override;
-    procedure SetHighlighter(const Value: TSynCustomHighlighter); override;
+    procedure SetHighlighter(const Value: TSynCustomHighlighter); {override;}
     procedure UTF8KeyPress(var Key: TUTF8Char); override;
     procedure KeyDown(var Key: Word; Shift: TShiftState); override;
     procedure KeyUp(var Key: Word; Shift: TShiftState); override;
@@ -311,11 +316,17 @@ type
     //
     function pageCaption(checkModule: boolean): string;
     procedure checkFileDate;
-    procedure loadFromFile(const fname: string);
-    procedure saveToFile(const fname: string);
+    procedure loadFromFile(const fname: string); override;
+    procedure saveToFile(const fname: string); override;
     procedure save;
     procedure saveTempFile;
     //
+    procedure DoCommand(ACmd: integer; const AText: atString = ''); override;
+    function hasSelection: boolean;
+    function selTextUTF8: string;
+    function lineTextAtCarret: string;
+    function indentationMode: TIndentationMode;
+    procedure selectLineAtCaret();
     procedure addBreakPoint(line: integer);
     procedure removeBreakPoint(line: integer);
     procedure curlyBraceCloseAndIndent;
@@ -350,22 +361,26 @@ type
     property IdentifierMatchOptions: TIdentifierMatchOptions read fMatchOpts write setMatchOpts;
     property Identifier: string read fIdentifier;
     property fileName: string read fFilename;
-    property modified: boolean read fModified;
+    property modified;
     property tempFilename: string read fTempFileName;
     //
     property completionMenu: TSynCompletion read fCompletion;
     property syncroEdit: TSynPluginSyncroEdit read fSyncEdit;
     property isDSource: boolean read fIsDSource;
     property isTemporary: boolean read getIfTemp;
-    property TextView;
+    //property TextView;
     //
+    property caretX: integer read getCaretX write setCaretX;
+    property caretY: integer read getCaretY write setCaretY;
+    property caretXY: TPoint read getCaretXY write setCaretXY;
     property transparentGutter: boolean read fTransparentGutter write setGutterTransparent;
     property isProjectDescription: boolean read fIsProjectDescription write fIsProjectDescription;
     property alwaysAdvancedFeatures: boolean read fAlwaysAdvancedFeatures write fAlwaysAdvancedFeatures;
     property phobosDocRoot: string read fPhobosDocRoot write fPhobosDocRoot;
     property detectIndentMode: boolean read fDetectIndentMode write fDetectIndentMode;
     property disableFileDateCheck: boolean read fDisableFileDateCheck write fDisableFileDateCheck;
-    property MouseBytePosition: Integer read getMouseBytePosition;
+    property mouseBytePosition: Integer read getMouseBytePosition;
+    property caretBytePosition: Integer read getCaretBytePosition write setCaretBytePosition;
     property D2Highlighter: TSynD2Syn read fD2Highlighter;
     property TxtHighlighter: TSynTxtSyn read fTxtHighlighter;
     property defaultFontSize: Integer read fDefaultFontSize write setDefaultFontSize;
@@ -402,35 +417,35 @@ type
   function CustomCommandToSstring(Int: Longint; var Ident: string): Boolean;
 
 const
-  ecCompletionMenu      = ecUserFirst + 1;
-  ecJumpToDeclaration   = ecUserFirst + 2;
-  ecPreviousLocation    = ecUserFirst + 3;
-  ecNextLocation        = ecUserFirst + 4;
-  ecRecordMacro         = ecUserFirst + 5;
-  ecPlayMacro           = ecUserFirst + 6;
-  ecShowDdoc            = ecUserFirst + 7;
-  ecShowCallTips        = ecUserFirst + 8;
-  ecCurlyBraceClose     = ecUserFirst + 9;
-  ecCommentSelection    = ecUserFirst + 10;
-  ecSwapVersionAllNone  = ecUserFirst + 11;
-  ecRenameIdentifier    = ecUserFirst + 12;
-  ecCommentIdentifier   = ecUserFirst + 13;
-  ecShowPhobosDoc       = ecUserFirst + 14;
-  ecPreviousChangedArea = ecUserFirst + 15;
-  ecNextChangedArea     = ecUserFirst + 16;
-  ecUpperCaseWordOrSel  = ecUserFirst + 17;
-  ecLowerCaseWordOrSel  = ecUserFirst + 18;
-  ecSortLines           = ecUserFirst + 19;
-  ecPrevProtGrp         = ecUserFirst + 20;
-  ecNextProtGrp         = ecUserFirst + 21;
-  ecAddBreakpoint       = ecUserFirst + 22;
-  ecRemoveBreakpoint    = ecUserFirst + 23;
-  ecToggleBreakpoint    = ecUserFirst + 24;
-  ecInsertDdocTemplate  = ecUserFirst + 25;
-  ecNextWarning         = ecUserFirst + 26;
-  ecPrevWarning         = ecUserFirst + 27;
-  ecGotoLine            = ecUserFirst + 28;
-  ecShowCurlineWarning  = ecUserFirst + 29;
+  ecCompletionMenu      = cCommand_FirstUser + 1;
+  ecJumpToDeclaration   = cCommand_FirstUser + 2;
+  ecPreviousLocation    = cCommand_FirstUser + 3;
+  ecNextLocation        = cCommand_FirstUser + 4;
+  ecRecordMacro         = cCommand_FirstUser + 5;
+  ecPlayMacro           = cCommand_FirstUser + 6;
+  ecShowDdoc            = cCommand_FirstUser + 7;
+  ecShowCallTips        = cCommand_FirstUser + 8;
+  ecCurlyBraceClose     = cCommand_FirstUser + 9;
+  ecCommentSelection    = cCommand_FirstUser + 10;
+  ecSwapVersionAllNone  = cCommand_FirstUser + 11;
+  ecRenameIdentifier    = cCommand_FirstUser + 12;
+  ecCommentIdentifier   = cCommand_FirstUser + 13;
+  ecShowPhobosDoc       = cCommand_FirstUser + 14;
+  ecPreviousChangedArea = cCommand_FirstUser + 15;
+  ecNextChangedArea     = cCommand_FirstUser + 16;
+  ecUpperCaseWordOrSel  = cCommand_FirstUser + 17;
+  ecLowerCaseWordOrSel  = cCommand_FirstUser + 18;
+  ecSortLines           = cCommand_FirstUser + 19;
+  ecPrevProtGrp         = cCommand_FirstUser + 20;
+  ecNextProtGrp         = cCommand_FirstUser + 21;
+  ecAddBreakpoint       = cCommand_FirstUser + 22;
+  ecRemoveBreakpoint    = cCommand_FirstUser + 23;
+  ecToggleBreakpoint    = cCommand_FirstUser + 24;
+  ecInsertDdocTemplate  = cCommand_FirstUser + 25;
+  ecNextWarning         = cCommand_FirstUser + 26;
+  ecPrevWarning         = cCommand_FirstUser + 27;
+  ecGotoLine            = cCommand_FirstUser + 28;
+  ecShowCurlineWarning  = cCommand_FirstUser + 29;
 
 var
   D2Syn: TSynD2Syn;     // used as model to set the options when no editor exists.
@@ -544,8 +559,8 @@ end;
 
 procedure TSortDialog.btnUndoClick(sender: TObject);
 begin
-  if fCanUndo then
-    fEditor.undo;
+  //if fCanUndo then
+  //  fEditor.undo;
   fCanUndo:= false;
 end;
 
@@ -587,28 +602,28 @@ var
 begin
   if fMemo.isNil then
     exit;
-
-  fCaretPosition := fMemo.SelStart;
+  //
+  fCaretPosition := fMemo.caretBytePosition;
   fSourceFilename := fMemo.fileName;
-  fSelectionEnd := fMemo.SelEnd;
+  //fSelectionEnd := fMemo.SelEnd;
   fFontSize := fMemo.Font.Size;
   TCEEditorHintWindow.FontSize := fMemo.Font.Size;
-
-  prev := fMemo.Lines.Count-1;
-  for i := fMemo.Lines.Count-1 downto 0 do
-  begin
-    // - CollapsedLineForFoldAtLine() does not handle the sub-folding.
-    // - TextView visibility is increased so this is not the standard way of getting the infos.
-    start := fMemo.TextView.CollapsedLineForFoldAtLine(i);
-    if start = -1 then
-      continue;
-    if start = prev then
-      continue;
-    prev := start;
-    itm := TCEFoldCache(fFolds.Add);
-    itm.isCollapsed := true;
-    itm.fLineIndex := start;
-  end;
+  //
+  //prev := fMemo.Lines.Count-1;
+  //for i := fMemo.Lines.Count-1 downto 0 do
+  //begin
+  //  // - CollapsedLineForFoldAtLine() does not handle the sub-folding.
+  //  // - TextView visibility is increased so this is not the standard way of getting the infos.
+  //  start := fMemo.TextView.CollapsedLineForFoldAtLine(i);
+  //  if start = -1 then
+  //    continue;
+  //  if start = prev then
+  //    continue;
+  //  prev := start;
+  //  itm := TCEFoldCache(fFolds.Add);
+  //  itm.isCollapsed := true;
+  //  itm.fLineIndex := start;
+  //end;
 end;
 
 procedure TCESynMemoCache.afterLoad;
@@ -618,24 +633,24 @@ var
 begin
   if fMemo.isNil then
     exit;
-
+  //
   if fFontSize > 0 then
     fMemo.Font.Size := fFontSize;
-
+  //
   // Currently collisions are not handled.
   if fMemo.fileName <> fSourceFilename then
     exit;
-
-  for i := 0 to fFolds.Count-1 do
-  begin
-    itm := TCEFoldCache(fFolds.Items[i]);
-    if not itm.isCollapsed then
-      continue;
-    fMemo.TextView.FoldAtLine(itm.lineIndex-1);
-  end;
-
-  fMemo.SelStart := fCaretPosition;
-  fMemo.SelEnd := fSelectionEnd;
+  //
+  //for i := 0 to fFolds.Count-1 do
+  //begin
+  //  itm := TCEFoldCache(fFolds.Items[i]);
+  //  if not itm.isCollapsed then
+  //    continue;
+  //  fMemo.TextView.FoldAtLine(itm.lineIndex-1);
+  //end;
+  //
+  fMemo.caretBytePosition := fCaretPosition;
+  //fMemo.SelEnd := fSelectionEnd;
 end;
 
 {$IFDEF DEBUG}{$R-}{$ENDIF}
@@ -680,7 +695,7 @@ end;
 {$ENDREGION}
 
 {$REGION TCESynMemoPositions ---------------------------------------------------}
-constructor TCESynMemoPositions.create(memo: TCustomSynEdit);
+constructor TCESynMemoPositions.create(memo: TCESynMemo);
 begin
   fList := TFPList.Create;
   fMax  := 40;
@@ -699,7 +714,7 @@ begin
   Inc(fPos);
   {$HINTS OFF}
   if fPos < fList.Count then
-    fMemo.CaretY := NativeInt(fList.Items[fPos])
+    fMemo.caretY := NativeInt(fList.Items[fPos])
   {$HINTS ON}
   else Dec(fPos);
 end;
@@ -709,7 +724,7 @@ begin
   Dec(fPos);
   {$HINTS OFF}
   if fPos > -1 then
-    fMemo.CaretY := NativeInt(fList.Items[fPos])
+    fMemo.caretY := NativeInt(fList.Items[fPos])
   {$HINTS ON}
   else Inc(fPos);
 end;
@@ -725,10 +740,10 @@ begin
   {$HINTS OFF}{$WARNINGS OFF}
   if fList.Count > 0 then
   begin
-    delta := fMemo.CaretY - NativeInt(fList.Items[fPos]);
+    delta := fMemo.caretY - NativeInt(fList.Items[fPos]);
     if (delta > -thresh) and (delta < thresh) then exit;
   end;
-  fList.Insert(0, Pointer(NativeInt(fMemo.CaretY)));
+  fList.Insert(0, Pointer(NativeInt(fMemo.caretY)));
   {$POP}
   while fList.Count > fMax do
     fList.Delete(fList.Count-1);
@@ -763,24 +778,24 @@ end;
 
 procedure TCEScrollMemo.updateFromSource;
 begin
-  fMemo.Font.Assign(fSource.Font);
-  fMemo.Lines := fSource.Lines;
-  width := fSource.Width div 2;
-  if fSource.Highlighter.isNotNil then
-  begin
-    fMemo.Color:= fSource.Color;
-    fMemo.LineHighlightColor.Assign(fSource.LineHighlightColor);
-    fMemo.SelectedColor.Assign(fSource.SelectedColor);
-    if fMemo.Highlighter.isNil then
-    begin
-      fD2Hl.Assign(fSource.Highlighter);
-      fTxtHl.Assign(fSource.Highlighter);
-    end;
-    if fSource.Highlighter is TSynD2Syn then
-      fMemo.Highlighter := fD2Hl
-    else
-      fMemo.Highlighter := fTxtHl;
-  end;
+  //fMemo.Font.Assign(fSource.Font);
+  //fMemo.Lines := fSource.Lines;
+  //width := fSource.Width div 2;
+  //if fSource.Highlighter.isNotNil then
+  //begin
+  //  fMemo.Color:= fSource.Color;
+  //  fMemo.LineHighlightColor.Assign(fSource.LineHighlightColor);
+  //  fMemo.SelectedColor.Assign(fSource.SelectedColor);
+  //  if fMemo.Highlighter.isNil then
+  //  begin
+  //    fD2Hl.Assign(fSource.Highlighter);
+  //    fTxtHl.Assign(fSource.Highlighter);
+  //  end;
+  //  if fSource.Highlighter is TSynD2Syn then
+  //    fMemo.Highlighter := fD2Hl
+  //  else
+  //    fMemo.Highlighter := fTxtHl;
+  //end;
 end;
 
 procedure TCEScrollMemo.SetVisible(Value: Boolean);
@@ -803,7 +818,7 @@ begin
     value := 1;
   fMemo.CaretY := value;
   fMemo.CaretX := 1;
-  fMemo.SelectLine(true);
+  //fMemo.selectLineAtCaret();
 end;
 {$ENDREGION}
 
@@ -819,10 +834,10 @@ begin
   fScrollMemo := TCEScrollMemo.construct(self);
 
   OnShowHint:= @showHintEvent;
-  OnStatusChange:= @handleStatusChanged;
+  //OnStatusChange:= @handleStatusChanged;
   fDefaultFontSize := 10;
   Font.Size:=10;
-  SetDefaultCoeditKeystrokes(Self); // not called in inherited if owner = nil !
+  //SetDefaultCoeditKeystrokes(Self); // not called in inherited if owner = nil !
   fLexToks:= TLexTokenList.Create;
   fSmartDdocNewline := true;
 
@@ -858,21 +873,21 @@ begin
   fDscannerResults:= TDscannerResults.create;
   fKnowsDscanner := fDscanner.Executable.fileExists;
 
-  Gutter.LineNumberPart.ShowOnlyLineNumbersMultiplesOf := 5;
-  Gutter.LineNumberPart.MarkupInfo.Foreground := clWindowText;
-  Gutter.LineNumberPart.MarkupInfo.Background := clBtnFace;
-  Gutter.SeparatorPart.LineOffset := 0;
-  Gutter.SeparatorPart.LineWidth := 1;
-  Gutter.OnGutterClick:= @gutterClick;
-  BracketMatchColor.Foreground:=clRed;
+  //Gutter.LineNumberPart.ShowOnlyLineNumbersMultiplesOf := 5;
+  //Gutter.LineNumberPart.MarkupInfo.Foreground := clWindowText;
+  //Gutter.LineNumberPart.MarkupInfo.Background := clBtnFace;
+  //Gutter.SeparatorPart.LineOffset := 0;
+  //Gutter.SeparatorPart.LineWidth := 1;
+  //Gutter.OnGutterClick:= @gutterClick;
+  //BracketMatchColor.Foreground:=clRed;
 
   fSyncEdit := TSynPluginSyncroEdit.Create(self);
-  fSyncEdit.Editor := self;
+  //fSyncEdit.Editor := self;
   fSyncEdit.CaseSensitive := true;
 
   fCompletion := TSyncompletion.create(nil);
   fCompletion.ShowSizeDrag := true;
-  fCompletion.Editor := Self;
+  //fCompletion.Editor := Self;
   fCompletion.OnExecute:= @completionExecute;
   fCompletion.OnCodeCompletion:=@completionCodeCompletion;
   fCompletion.OnPaintItem:= @completionItemPaint;
@@ -887,24 +902,26 @@ begin
   fCompletion.Width:= 250;
   fCallTipStrings:= TStringList.Create;
 
-  MouseLinkColor.Style:= [fsUnderline];
-  with MouseActions.Add do begin
-    Command := emcMouseLink;
-    shift := [ssCtrl];
-    ShiftMask := [ssCtrl];
-  end;
+  //MouseLinkColor.Style:= [fsUnderline];
+  //with MouseActions.Add do begin
+  //  Command := emcMouseLink;
+  //  shift := [ssCtrl];
+  //  ShiftMask := [ssCtrl];
+  //end;
 
   fD2Highlighter := TSynD2Syn.create(self);
   fTxtHighlighter := TSynTxtSyn.Create(self);
-  Highlighter := fD2Highlighter;
+  //Highlighter := fD2Highlighter;
 
   fTempFileName := GetTempDir(false) + 'temp_' + uniqueObjStr(self) + '.d';
   fFilename := '<new document>';
-  fModified := false;
-  TextBuffer.AddNotifyHandler(senrUndoRedoAdded, @changeNotify);
+  Modified := false;
+  self.OnChange := @changeNotify;
+  self.OnChangeCaretPos := @changeNotify;
+  //TextBuffer.AddNotifyHandler(senrUndoRedoAdded, @changeNotify);
 
-  Gutter.MarksPart.AutoSize:=false;
-  Gutter.MarksPart.Width := ScaleX(20,96);
+  //Gutter.MarksPart.AutoSize:=false;
+  //Gutter.MarksPart.Width := ScaleX(20,96);
   fImages := TImageList.Create(self);
   z := GetIconScaledSize;
   case z of
@@ -952,16 +969,23 @@ begin
   fPositions := TCESynMemoPositions.create(self);
   fMultiDocSubject := TCEMultiDocSubject.create;
 
-  HighlightAllColor.Foreground := clNone;
-  HighlightAllColor.Background := clSilver;
-  HighlightAllColor.BackAlpha  := 70;
-  IdentifierMatchOptions:= [caseSensitive];
-
-  LineHighlightColor.Background := color - $080808;
-  LineHighlightColor.Foreground := clNone;
+  //HighlightAllColor.Foreground := clNone;
+  //HighlightAllColor.Background := clSilver;
+  //HighlightAllColor.BackAlpha  := 70;
+  //IdentifierMatchOptions:= [caseSensitive];
+  //
+  //LineHighlightColor.Background := color - $080808;
+  //LineHighlightColor.Foreground := clNone;
 
   //fIndentGuideMarkup:= TSynEditMarkupFoldColors.Create(self);
   //MarkupManager.AddMarkUp(fIndentGuideMarkup);
+
+  OptTabSize:= 4;
+  OptIndentSize:= 4;
+  OptTabSpaces:= true;
+  OptSavingTrimSpaces:= true;
+  OptSavingForceFinalEol:=false;
+  OptAllowReadOnly:=true;
 
   fAutoCloseCurlyBrace:= autoCloseOnNewLineLexically;
   fAutoClosedPairs:= [autoCloseSquareBracket];
@@ -1001,21 +1025,21 @@ begin
   fTransparentGutter:=value;
   if fTransparentGutter then
   begin
-    Gutter.LineNumberPart.MarkupInfo.Background:= Color;
-    Gutter.SeparatorPart.MarkupInfo.Background:= Color;
-    Gutter.MarksPart.MarkupInfo.Background:= Color;
-    Gutter.ChangesPart.MarkupInfo.Background:= Color;
-    Gutter.CodeFoldPart.MarkupInfo.Background:= Color;
-    Gutter.Color:=Color;
+    //Gutter.LineNumberPart.MarkupInfo.Background:= Color;
+    //Gutter.SeparatorPart.MarkupInfo.Background:= Color;
+    //Gutter.MarksPart.MarkupInfo.Background:= Color;
+    //Gutter.ChangesPart.MarkupInfo.Background:= Color;
+    //Gutter.CodeFoldPart.MarkupInfo.Background:= Color;
+    //Gutter.Color:=Color;
   end
   else
   begin
-    Gutter.LineNumberPart.MarkupInfo.Background:= clBtnFace;
-    Gutter.SeparatorPart.MarkupInfo.Background:= clBtnFace;
-    Gutter.MarksPart.MarkupInfo.Background:= clBtnFace;
-    Gutter.ChangesPart.MarkupInfo.Background:= clBtnFace;
-    Gutter.CodeFoldPart.MarkupInfo.Background:= clBtnFace;
-    Gutter.Color:=clBtnFace;
+    //Gutter.LineNumberPart.MarkupInfo.Background:= clBtnFace;
+    //Gutter.SeparatorPart.MarkupInfo.Background:= clBtnFace;
+    //Gutter.MarksPart.MarkupInfo.Background:= clBtnFace;
+    //Gutter.ChangesPart.MarkupInfo.Background:= clBtnFace;
+    //Gutter.CodeFoldPart.MarkupInfo.Background:= clBtnFace;
+    //Gutter.Color:=clBtnFace;
   end;
 end;
 
@@ -1084,6 +1108,153 @@ begin
       fCompletion.Deactivate;
   end;
 end;
+
+function TCESynMemo.getCaretX: integer;
+var
+  c: TATCaretItem;
+begin
+  result := 1;
+  if Carets.Count = 0 then
+    exit;
+  c:= Carets[0];
+  if not Strings.IsIndexValid(c.PosY) then
+    exit;
+  result := min(c.PosX, Strings.LinesLen[c.PosY]);
+  result += 1;
+end;
+
+function TCESynMemo.getCaretY: integer;
+begin
+  result := Carets[0].PosY + 1;
+end;
+
+function TCESynMemo.getCaretXY: TPoint;
+begin
+  result := point(getCaretX, getCaretY);
+end;
+
+procedure TCESynMemo.setCaretX(value: integer);
+begin
+  Carets[0].PosX := value - 1;
+  DoGotoCaret(TATCaretEdge.cEdgeRight);
+end;
+
+procedure TCESynMemo.setCaretY(value: integer);
+begin
+  Carets[0].PosY := value - 1;
+  DoGotoCaret(TATCaretEdge.cEdgeRight);
+end;
+
+procedure TCESynMemo.setCaretXY(value: TPoint);
+begin
+  setCaretX(value.x);
+  setCaretY(value.y);
+end;
+
+procedure TCESynMemo.selectLineAtCaret();
+var
+  c: TATCaretItem;
+begin
+  c := Carets[0];
+  if Strings.IsIndexValid(c.PosY) then
+    DoSelect_Line(point(0, c.PosY));
+end;
+
+function TCESynMemo.lineTextAtCarret(): string;
+var
+  c: TATCaretItem;
+begin
+  c := Carets[0];
+  Result := '';
+  if Strings.IsIndexValid(c.PosY) then
+    Result := Strings.LinesUTF8[c.PosY];
+end;
+
+function TCESynMemo.hasSelection: boolean;
+var
+  c: TATCaretItem;
+begin
+  c := Carets[0];
+  Result := false;
+  if Strings.IsIndexValid(c.PosY) then
+    Result := c.EndX <> -1;
+end;
+
+function TCESynMemo.selTextUTF8: string;
+begin
+  Result := UTF8Encode(TextSelected);
+end;
+
+function TCESynMemo.indentationMode: TIndentationMode;
+  function checkLine(index: integer): TIndentationMode;
+  var
+    u: string;
+  begin
+    result := imNone;
+    u := strings.LinesUTF8[index];
+    if (u.length > 0) and (u[1] = #9) then
+      result := imTabs
+    else if (u.length > 1) and (u[1..2] = '  ') then
+      result := imSpaces;
+  end;
+var
+  i: integer;
+  t: integer = 0;
+  s: integer = 0;
+begin
+  for i:= 0 to strings.count-1 do
+  begin
+    result := checkLine(i);
+    t += byte(result = imTabs);
+    s += byte(result = imSpaces);
+  end;
+  if (t <> 0) and (s <> 0) then
+    result := imMixed
+  else if t = 0 then
+    result := imSpaces
+  else if s = 0 then
+    result := imTabs
+  else
+    result := imNone;
+end;
+
+function TCESynMemo.getCaretBytePosition: integer;
+var
+  x: integer;
+  y: integer;
+  i: integer;
+begin
+  result := 0;
+  x := caretX;
+  y := caretY;
+  if (x - 1 > strings.LinesLen[y-1]) or (y > Strings.Count) then
+    exit;
+  for i:= 0 to y-2 do
+    result += Strings.LinesLenPhysical[i];
+  result += x;
+end;
+
+procedure TCESynMemo.setCaretBytePosition(value: integer);
+var
+  i: integer;
+  s: integer = 0;
+  e: integer = 0;
+  r: integer = 0;
+  p: TPoint;
+begin
+  for i := 0 to strings.Count-1 do
+  begin
+    s := e;
+    r := value - s;
+    e := s + strings.LinesLen[i] + length(cLineEndStrings[strings.LinesEnds[i]]);
+    if (s <= value) and (value <= e) then
+    begin
+      p := point(r + 1, i + 1);
+      caretXY := p;
+      break;
+    end;
+  end;
+end;
 {$ENDREGION --------------------------------------------------------------------}
 
 {$REGION Custom editor commands and shortcuts ----------------------------------}
@@ -1093,117 +1264,117 @@ begin
   begin
     Keystrokes.Clear;
 
-    AddKey(ecUp, VK_UP, [], 0, []);
-    AddKey(ecSelUp, VK_UP, [ssShift], 0, []);
-    AddKey(ecScrollUp, VK_UP, [ssCtrl], 0, []);
-    AddKey(ecDown, VK_DOWN, [], 0, []);
-    AddKey(ecSelDown, VK_DOWN, [ssShift], 0, []);
-    AddKey(ecScrollDown, VK_DOWN, [ssCtrl], 0, []);
-    AddKey(ecLeft, VK_LEFT, [], 0, []);
-    AddKey(ecSelLeft, VK_LEFT, [ssShift], 0, []);
-    AddKey(ecWordLeft, VK_LEFT, [ssCtrl], 0, []);
-    AddKey(ecWordEndLeft, VK_LEFT, [ssCtrl,ssAlt], 0, []);
-    AddKey(ecWordEndRight, VK_RIGHT, [ssCtrl,ssAlt], 0, []);
-    AddKey(ecSelWordLeft, VK_LEFT, [ssShift,ssCtrl], 0, []);
-    AddKey(ecRight, VK_RIGHT, [], 0, []);
-    AddKey(ecSelRight, VK_RIGHT, [ssShift], 0, []);
-    AddKey(ecWordRight, VK_RIGHT, [ssCtrl], 0, []);
-    AddKey(ecSelWordRight, VK_RIGHT, [ssShift,ssCtrl], 0, []);
-    AddKey(ecPageDown, VK_NEXT, [], 0, []);
-    AddKey(ecSelPageDown, VK_NEXT, [ssShift], 0, []);
-    AddKey(ecPageBottom, VK_NEXT, [ssCtrl], 0, []);
-    AddKey(ecSelPageBottom, VK_NEXT, [ssShift,ssCtrl], 0, []);
-    AddKey(ecPageUp, VK_PRIOR, [], 0, []);
-    AddKey(ecSelPageUp, VK_PRIOR, [ssShift], 0, []);
-    AddKey(ecPageTop, VK_PRIOR, [ssCtrl], 0, []);
-    AddKey(ecSelPageTop, VK_PRIOR, [ssShift,ssCtrl], 0, []);
-    AddKey(ecLineStart, VK_HOME, [], 0, []);
-    AddKey(ecSelLineStart, VK_HOME, [ssShift], 0, []);
-    AddKey(ecEditorTop, VK_HOME, [ssCtrl], 0, []);
-    AddKey(ecSelEditorTop, VK_HOME, [ssShift,ssCtrl], 0, []);
-    AddKey(ecLineEnd, VK_END, [], 0, []);
-    AddKey(ecSelLineEnd, VK_END, [ssShift], 0, []);
-    AddKey(ecEditorBottom, VK_END, [ssCtrl], 0, []);
-    AddKey(ecSelEditorBottom, VK_END, [ssShift,ssCtrl], 0, []);
-    AddKey(ecToggleMode, VK_INSERT, [], 0, []);
-    AddKey(ecDeleteChar, VK_DELETE, [], 0, []);
-    AddKey(ecDeleteLastChar, VK_BACK, [], 0, []);
-    AddKey(ecDeleteLastWord, VK_BACK, [ssCtrl], 0, []);
-    AddKey(ecLineBreak, VK_RETURN, [], 0, []);
-    AddKey(ecSelectAll, ord('A'), [ssCtrl], 0, []);
-    AddKey(ecCopy, ord('C'), [ssCtrl], 0, []);
-    AddKey(ecBlockIndent, ord('I'), [ssCtrl,ssShift], 0, []);
-    AddKey(ecInsertLine, ord('N'), [ssCtrl], 0, []);
-    AddKey(ecDeleteWord, ord('T'), [ssCtrl], 0, []);
-    AddKey(ecBlockUnindent, ord('U'), [ssCtrl,ssShift], 0, []);
-    AddKey(ecPaste, ord('V'), [ssCtrl], 0, []);
-    AddKey(ecCut, ord('X'), [ssCtrl], 0, []);
-    AddKey(ecDeleteLine, ord('Y'), [ssCtrl], 0, []);
-    AddKey(ecDeleteEOL, ord('Y'), [ssCtrl,ssShift], 0, []);
-    AddKey(ecUndo, ord('Z'), [ssCtrl], 0, []);
-    AddKey(ecRedo, ord('Z'), [ssCtrl,ssShift], 0, []);
-    AddKey(ecFoldLevel1, ord('1'), [ssAlt,ssShift], 0, []);
-    AddKey(ecFoldLevel2, ord('2'), [ssAlt,ssShift], 0, []);
-    AddKey(ecFoldLevel3, ord('3'), [ssAlt,ssShift], 0, []);
-    AddKey(ecFoldLevel4, ord('4'), [ssAlt,ssShift], 0, []);
-    AddKey(ecFoldLevel5, ord('5'), [ssAlt,ssShift], 0, []);
-    AddKey(ecFoldLevel6, ord('6'), [ssAlt,ssShift], 0, []);
-    AddKey(ecFoldLevel7, ord('7'), [ssAlt,ssShift], 0, []);
-    AddKey(ecFoldLevel8, ord('8'), [ssAlt,ssShift], 0, []);
-    AddKey(ecFoldLevel9, ord('9'), [ssAlt,ssShift], 0, []);
-    AddKey(ecFoldLevel0, ord('0'), [ssAlt,ssShift], 0, []);
-    AddKey(ecFoldCurrent, ord('-'), [ssAlt,ssShift], 0, []);
-    AddKey(ecUnFoldCurrent, ord('+'), [ssAlt,ssShift], 0, []);
-    AddKey(EcToggleMarkupWord, ord('M'), [ssAlt], 0, []);
-    AddKey(ecNormalSelect, ord('N'), [ssCtrl,ssShift], 0, []);
-    AddKey(ecColumnSelect, ord('C'), [ssCtrl,ssShift], 0, []);
-    AddKey(ecLineSelect, ord('L'), [ssCtrl,ssShift], 0, []);
-    AddKey(ecTab, VK_TAB, [], 0, []);
-    AddKey(ecShiftTab, VK_TAB, [ssShift], 0, []);
-    AddKey(ecMatchBracket, ord('B'), [ssCtrl,ssShift], 0, []);
-    AddKey(ecColSelUp, VK_UP,    [ssAlt, ssShift], 0, []);
-    AddKey(ecColSelDown, VK_DOWN,  [ssAlt, ssShift], 0, []);
-    AddKey(ecColSelLeft, VK_LEFT, [ssAlt, ssShift], 0, []);
-    AddKey(ecColSelRight, VK_RIGHT, [ssAlt, ssShift], 0, []);
-    AddKey(ecColSelPageDown, VK_NEXT, [ssAlt, ssShift], 0, []);
-    AddKey(ecColSelPageBottom, VK_NEXT, [ssAlt, ssShift,ssCtrl], 0, []);
-    AddKey(ecColSelPageUp, VK_PRIOR, [ssAlt, ssShift], 0, []);
-    AddKey(ecColSelPageTop, VK_PRIOR, [ssAlt, ssShift,ssCtrl], 0, []);
-    AddKey(ecColSelLineStart, VK_HOME, [ssAlt, ssShift], 0, []);
-    AddKey(ecColSelLineEnd, VK_END, [ssAlt, ssShift], 0, []);
-    AddKey(ecColSelEditorTop, VK_HOME, [ssAlt, ssShift,ssCtrl], 0, []);
-    AddKey(ecColSelEditorBottom, VK_END, [ssAlt, ssShift,ssCtrl], 0, []);
-    AddKey(ecSynPSyncroEdStart, ord('E'), [ssCtrl], 0, []);
-    AddKey(ecSynPSyncroEdEscape, ord('E'), [ssCtrl, ssShift], 0, []);
-    AddKey(ecCompletionMenu, ord(' '), [ssCtrl], 0, []);
-    AddKey(ecJumpToDeclaration, VK_UP, [ssCtrl,ssShift], 0, []);
-    AddKey(ecPreviousLocation, 0, [], 0, []);
-    AddKey(ecNextLocation, 0, [], 0, []);
-    AddKey(ecRecordMacro, ord('R'), [ssCtrl,ssShift], 0, []);
-    AddKey(ecPlayMacro, ord('P'), [ssCtrl,ssShift], 0, []);
-    AddKey(ecShowDdoc, 0, [], 0, []);
-    AddKey(ecShowCallTips, 0, [], 0, []);
-    AddKey(ecCurlyBraceClose, 0, [], 0, []);
-    AddKey(ecCommentSelection, ord('/'), [ssCtrl], 0, []);
-    AddKey(ecSwapVersionAllNone, 0, [], 0, []);
-    AddKey(ecRenameIdentifier, VK_F2, [], 0, []);
-    AddKey(ecCommentIdentifier, 0, [], 0, []);
-    AddKey(ecShowPhobosDoc, VK_F1, [], 0, []);
-    AddKey(ecPreviousChangedArea, VK_UP, [ssAlt], 0, []);
-    AddKey(ecNextChangedArea, VK_DOWN, [ssAlt], 0, []);
-    AddKey(ecLowerCaseWordOrSel, 0, [], 0, []);
-    AddKey(ecUpperCaseWordOrSel, 0, [], 0, []);
-    AddKey(ecSortLines, 0, [], 0, []);
-    AddKey(ecPrevProtGrp, 0, [], 0, []);
-    AddKey(ecNextProtGrp, 0, [], 0, []);
-    AddKey(ecAddBreakpoint, 0, [], 0, []);
-    AddKey(ecRemoveBreakpoint, 0, [], 0, []);
-    AddKey(ecToggleBreakpoint, 0, [], 0, []);
-    AddKey(ecInsertDdocTemplate, 0, [], 0, []);
-    AddKey(ecPrevWarning, 0, [], 0, []);
-    AddKey(ecNextWarning, 0, [], 0, []);
-    AddKey(ecGotoLine, 0, [], 0, []);
-    AddKey(ecShowCurlineWarning, 0, [], 0, []);
+    //AddKey(ecUp, VK_UP, [], 0, []);
+    //AddKey(ecSelUp, VK_UP, [ssShift], 0, []);
+    //AddKey(ecScrollUp, VK_UP, [ssCtrl], 0, []);
+    //AddKey(ecDown, VK_DOWN, [], 0, []);
+    //AddKey(ecSelDown, VK_DOWN, [ssShift], 0, []);
+    //AddKey(ecScrollDown, VK_DOWN, [ssCtrl], 0, []);
+    //AddKey(ecLeft, VK_LEFT, [], 0, []);
+    //AddKey(ecSelLeft, VK_LEFT, [ssShift], 0, []);
+    //AddKey(ecWordLeft, VK_LEFT, [ssCtrl], 0, []);
+    //AddKey(ecWordEndLeft, VK_LEFT, [ssCtrl,ssAlt], 0, []);
+    //AddKey(ecWordEndRight, VK_RIGHT, [ssCtrl,ssAlt], 0, []);
+    //AddKey(ecSelWordLeft, VK_LEFT, [ssShift,ssCtrl], 0, []);
+    //AddKey(ecRight, VK_RIGHT, [], 0, []);
+    //AddKey(ecSelRight, VK_RIGHT, [ssShift], 0, []);
+    //AddKey(ecWordRight, VK_RIGHT, [ssCtrl], 0, []);
+    //AddKey(ecSelWordRight, VK_RIGHT, [ssShift,ssCtrl], 0, []);
+    //AddKey(ecPageDown, VK_NEXT, [], 0, []);
+    //AddKey(ecSelPageDown, VK_NEXT, [ssShift], 0, []);
+    //AddKey(ecPageBottom, VK_NEXT, [ssCtrl], 0, []);
+    //AddKey(ecSelPageBottom, VK_NEXT, [ssShift,ssCtrl], 0, []);
+    //AddKey(ecPageUp, VK_PRIOR, [], 0, []);
+    //AddKey(ecSelPageUp, VK_PRIOR, [ssShift], 0, []);
+    //AddKey(ecPageTop, VK_PRIOR, [ssCtrl], 0, []);
+    //AddKey(ecSelPageTop, VK_PRIOR, [ssShift,ssCtrl], 0, []);
+    //AddKey(ecLineStart, VK_HOME, [], 0, []);
+    //AddKey(ecSelLineStart, VK_HOME, [ssShift], 0, []);
+    //AddKey(ecEditorTop, VK_HOME, [ssCtrl], 0, []);
+    //AddKey(ecSelEditorTop, VK_HOME, [ssShift,ssCtrl], 0, []);
+    //AddKey(ecLineEnd, VK_END, [], 0, []);
+    //AddKey(ecSelLineEnd, VK_END, [ssShift], 0, []);
+    //AddKey(ecEditorBottom, VK_END, [ssCtrl], 0, []);
+    //AddKey(ecSelEditorBottom, VK_END, [ssShift,ssCtrl], 0, []);
+    //AddKey(ecToggleMode, VK_INSERT, [], 0, []);
+    //AddKey(ecDeleteChar, VK_DELETE, [], 0, []);
+    //AddKey(ecDeleteLastChar, VK_BACK, [], 0, []);
+    //AddKey(ecDeleteLastWord, VK_BACK, [ssCtrl], 0, []);
+    //AddKey(ecLineBreak, VK_RETURN, [], 0, []);
+    //AddKey(ecSelectAll, ord('A'), [ssCtrl], 0, []);
+    //AddKey(ecCopy, ord('C'), [ssCtrl], 0, []);
+    //AddKey(ecBlockIndent, ord('I'), [ssCtrl,ssShift], 0, []);
+    //AddKey(ecInsertLine, ord('N'), [ssCtrl], 0, []);
+    //AddKey(ecDeleteWord, ord('T'), [ssCtrl], 0, []);
+    //AddKey(ecBlockUnindent, ord('U'), [ssCtrl,ssShift], 0, []);
+    //AddKey(ecPaste, ord('V'), [ssCtrl], 0, []);
+    //AddKey(ecCut, ord('X'), [ssCtrl], 0, []);
+    //AddKey(ecDeleteLine, ord('Y'), [ssCtrl], 0, []);
+    //AddKey(ecDeleteEOL, ord('Y'), [ssCtrl,ssShift], 0, []);
+    //AddKey(ecUndo, ord('Z'), [ssCtrl], 0, []);
+    //AddKey(ecRedo, ord('Z'), [ssCtrl,ssShift], 0, []);
+    //AddKey(ecFoldLevel1, ord('1'), [ssAlt,ssShift], 0, []);
+    //AddKey(ecFoldLevel2, ord('2'), [ssAlt,ssShift], 0, []);
+    //AddKey(ecFoldLevel3, ord('3'), [ssAlt,ssShift], 0, []);
+    //AddKey(ecFoldLevel4, ord('4'), [ssAlt,ssShift], 0, []);
+    //AddKey(ecFoldLevel5, ord('5'), [ssAlt,ssShift], 0, []);
+    //AddKey(ecFoldLevel6, ord('6'), [ssAlt,ssShift], 0, []);
+    //AddKey(ecFoldLevel7, ord('7'), [ssAlt,ssShift], 0, []);
+    //AddKey(ecFoldLevel8, ord('8'), [ssAlt,ssShift], 0, []);
+    //AddKey(ecFoldLevel9, ord('9'), [ssAlt,ssShift], 0, []);
+    //AddKey(ecFoldLevel0, ord('0'), [ssAlt,ssShift], 0, []);
+    //AddKey(ecFoldCurrent, ord('-'), [ssAlt,ssShift], 0, []);
+    //AddKey(ecUnFoldCurrent, ord('+'), [ssAlt,ssShift], 0, []);
+    //AddKey(EcToggleMarkupWord, ord('M'), [ssAlt], 0, []);
+    //AddKey(ecNormalSelect, ord('N'), [ssCtrl,ssShift], 0, []);
+    //AddKey(ecColumnSelect, ord('C'), [ssCtrl,ssShift], 0, []);
+    //AddKey(ecLineSelect, ord('L'), [ssCtrl,ssShift], 0, []);
+    //AddKey(ecTab, VK_TAB, [], 0, []);
+    //AddKey(ecShiftTab, VK_TAB, [ssShift], 0, []);
+    //AddKey(ecMatchBracket, ord('B'), [ssCtrl,ssShift], 0, []);
+    //AddKey(ecColSelUp, VK_UP,    [ssAlt, ssShift], 0, []);
+    //AddKey(ecColSelDown, VK_DOWN,  [ssAlt, ssShift], 0, []);
+    //AddKey(ecColSelLeft, VK_LEFT, [ssAlt, ssShift], 0, []);
+    //AddKey(ecColSelRight, VK_RIGHT, [ssAlt, ssShift], 0, []);
+    //AddKey(ecColSelPageDown, VK_NEXT, [ssAlt, ssShift], 0, []);
+    //AddKey(ecColSelPageBottom, VK_NEXT, [ssAlt, ssShift,ssCtrl], 0, []);
+    //AddKey(ecColSelPageUp, VK_PRIOR, [ssAlt, ssShift], 0, []);
+    //AddKey(ecColSelPageTop, VK_PRIOR, [ssAlt, ssShift,ssCtrl], 0, []);
+    //AddKey(ecColSelLineStart, VK_HOME, [ssAlt, ssShift], 0, []);
+    //AddKey(ecColSelLineEnd, VK_END, [ssAlt, ssShift], 0, []);
+    //AddKey(ecColSelEditorTop, VK_HOME, [ssAlt, ssShift,ssCtrl], 0, []);
+    //AddKey(ecColSelEditorBottom, VK_END, [ssAlt, ssShift,ssCtrl], 0, []);
+    //AddKey(ecSynPSyncroEdStart, ord('E'), [ssCtrl], 0, []);
+    //AddKey(ecSynPSyncroEdEscape, ord('E'), [ssCtrl, ssShift], 0, []);
+    //AddKey(ecCompletionMenu, ord(' '), [ssCtrl], 0, []);
+    //AddKey(ecJumpToDeclaration, VK_UP, [ssCtrl,ssShift], 0, []);
+    //AddKey(ecPreviousLocation, 0, [], 0, []);
+    //AddKey(ecNextLocation, 0, [], 0, []);
+    //AddKey(ecRecordMacro, ord('R'), [ssCtrl,ssShift], 0, []);
+    //AddKey(ecPlayMacro, ord('P'), [ssCtrl,ssShift], 0, []);
+    //AddKey(ecShowDdoc, 0, [], 0, []);
+    //AddKey(ecShowCallTips, 0, [], 0, []);
+    //AddKey(ecCurlyBraceClose, 0, [], 0, []);
+    //AddKey(ecCommentSelection, ord('/'), [ssCtrl], 0, []);
+    //AddKey(ecSwapVersionAllNone, 0, [], 0, []);
+    //AddKey(ecRenameIdentifier, VK_F2, [], 0, []);
+    //AddKey(ecCommentIdentifier, 0, [], 0, []);
+    //AddKey(ecShowPhobosDoc, VK_F1, [], 0, []);
+    //AddKey(ecPreviousChangedArea, VK_UP, [ssAlt], 0, []);
+    //AddKey(ecNextChangedArea, VK_DOWN, [ssAlt], 0, []);
+    //AddKey(ecLowerCaseWordOrSel, 0, [], 0, []);
+    //AddKey(ecUpperCaseWordOrSel, 0, [], 0, []);
+    //AddKey(ecSortLines, 0, [], 0, []);
+    //AddKey(ecPrevProtGrp, 0, [], 0, []);
+    //AddKey(ecNextProtGrp, 0, [], 0, []);
+    //AddKey(ecAddBreakpoint, 0, [], 0, []);
+    //AddKey(ecRemoveBreakpoint, 0, [], 0, []);
+    //AddKey(ecToggleBreakpoint, 0, [], 0, []);
+    //AddKey(ecInsertDdocTemplate, 0, [], 0, []);
+    //AddKey(ecPrevWarning, 0, [], 0, []);
+    //AddKey(ecNextWarning, 0, [], 0, []);
+    //AddKey(ecGotoLine, 0, [], 0, []);
+    //AddKey(ecShowCurlineWarning, 0, [], 0, []);
   end;
 end;
 
@@ -1279,19 +1450,18 @@ begin
   end;
 end;
 
-procedure TCESynMemo.DoOnProcessCommand(var Command: TSynEditorCommand;
-  var AChar: TUTF8Char; Data: pointer);
+procedure TCESynMemo.DoCommand(ACmd: integer; const AText: atString = '');
 begin
   inherited;
-  case Command of
+  case ACmd of
     ecPaste: patchClipboardIndentation;
     ecCompletionMenu:
     begin
       fCanAutoDot:=false;
       if not fIsDSource and not alwaysAdvancedFeatures then
         exit;
-      fCompletion.Execute(GetWordAtRowCol(LogicalCaretXY),
-        ClientToScreen(point(CaretXPix, CaretYPix + LineHeight)));
+      //fCompletion.Execute(GetWordAtRowCol(LogicalCaretXY),
+      //  ClientToScreen(point(CaretXPix, CaretYPix + LineHeight)));
     end;
     ecPreviousLocation:
       fPositions.back;
@@ -1356,20 +1526,20 @@ begin
     ecShowCurlineWarning:
       showCurLineWarning;
   end;
-  if fOverrideColMode and not SelAvail then
-  begin
-    fOverrideColMode := false;
-    Options := Options - [eoScrollPastEol];
-  end;
+  //if fOverrideColMode and not SelAvail then
+  //begin
+  //  fOverrideColMode := false;
+  //  Options := Options - [eoScrollPastEol];
+  //end;
 end;
 
 procedure TCESynMemo.insertLeadingDDocSymbol(c: char);
 begin
-  BeginUndoBlock;
+  strings.BeginUndoGroup;
   if ((CaretX-1) and 1) = 0 then
-    ExecuteCommand(ecChar, ' ', nil);
-  ExecuteCommand(ecChar, c, nil);
-  EndUndoBlock;
+    DoCommand(cCommand_TextInsert, ' ');
+  DoCommand(cCommand_TextInsert, c);
+  strings.EndUndoGroup;
 end;
 
 procedure TCESynMemo.curlyBraceCloseAndIndent;
@@ -1382,12 +1552,12 @@ begin
   if not fIsDSource and not alwaysAdvancedFeatures then
     exit;
 
-  i := CaretY - 1;
+  i := caretY - 1;
   while true do
   begin
     if i < 0 then
       break;
-    beg := Lines[i];
+    beg := Strings.LinesUTF8[i];
     if (Pos('{', beg) = 0) then
       i -= 1
     else
@@ -1402,37 +1572,35 @@ begin
       else break;
     end;
   end;
-  numTabs += numSpac div TabWidth;
+  numTabs += numSpac div OptTabSize;
 
-  BeginUndoBlock;
+  //Strings.BeginUndoGroup;
 
-  CommandProcessor(ecInsertLine, '', nil);
-  CommandProcessor(ecDown, '', nil);
+  DoCommand(cCommand_TextInsertEmptyBelow);
+  DoCommand(cCommand_TextInsertEmptyBelow);
+  for i:= 0 to numTabs-1 do DoCommand(cCommand_KeyTab);
+  DoCommand(cCommand_TextInsert, '}');
 
-  CommandProcessor(ecInsertLine, '', nil);
-  CommandProcessor(ecDown, '', nil);
-  while CaretX <> 1 do CommandProcessor(ecLeft, '' , nil);
-  for i:= 0 to numTabs-1 do CommandProcessor(ecTab, '', nil);
-  CommandProcessor(ecChar, '}', nil);
+  DoCommand(cCommand_KeyUp);
+  DoCommand(cCommand_TextDeleteToLineBegin);
+  for i:= 0 to numTabs do DoCommand(cCommand_KeyTab);
 
-  CommandProcessor(ecUp, '', nil);
-  while CaretX <> 1 do CommandProcessor(ecLeft, '' , nil);
-  for i:= 0 to numTabs do CommandProcessor(ecTab, '', nil);
-
-  EndUndoBlock;
+  //strings.EndUndoGroup
 end;
 
 procedure TCESynMemo.commentSelection;
   procedure commentHere;
   begin
-    ExecuteCommand(ecChar, '/', nil);
-    ExecuteCommand(ecChar, '/', nil);
+    DoCommand(cCommand_TextInsert, '//');
   end;
   procedure unCommentHere;
   begin
-    ExecuteCommand(ecLineTextStart, '', nil);
-    ExecuteCommand(ecDeleteChar, '', nil);
-    ExecuteCommand(ecDeleteChar, '', nil);
+    DoCommand(cCommand_GotoLineAbsBegin);
+    DoCommand(cCommand_KeyDelete);
+    DoCommand(cCommand_KeyDelete);
+    //ExecuteCommand(ecLineTextStart, '', nil);
+    //ExecuteCommand(ecDeleteChar, '', nil);
+    //ExecuteCommand(ecDeleteChar, '', nil);
   end;
 var
   i, j, dx, lx, numUndo: integer;
@@ -1440,13 +1608,13 @@ var
   mustUndo: boolean = false;
   pt, cp: TPoint;
 begin
-  if not SelAvail then
+  if not hasSelection then
   begin
     i := CaretX;
-    line := TrimLeft(LineText);
+    line := TrimLeft(lineTextAtCarret);
     mustUndo := (line.length > 1) and (line[1..2] = '//');
-    BeginUndoBlock;
-    ExecuteCommand(ecLineTextStart, '', nil);
+    strings.BeginUndoGroup;
+    DoCommand(cCommand_GotoLineAbsBegin);
     if not mustUndo then
     begin
       commentHere;
@@ -1457,21 +1625,21 @@ begin
       unCommentHere;
       CaretX:= i-2;
     end;
-    EndUndoBlock;
+    strings.EndUndoGroup;
   end else
   begin
     mustUndo := false;
     pt.X:= high(pt.X);
     cp := CaretXY;
     numUndo := 0;
-    for i := BlockBegin.Y-1 to BlockEnd.Y-1 do
+    for i := caretY-1 to Carets[0].EndY-1 do
     begin
-      line := TrimLeft(Lines[i]);
-      dx := Lines[i].length - line.length;
+      line := TrimLeft(strings.LinesUTF8[i]);
+      dx := strings.LinesUTF8[i].length - line.length;
       lx := 0;
       for j := 1 to dx do
-        if Lines[i][j] = #9 then
-          lx += TabWidth
+        if strings.LinesUTF8[i][j] = #9 then
+          lx += OptTabSize
         else
           lx += 1;
       if (lx + 1 < pt.X) and not line.isEmpty then
@@ -1481,19 +1649,17 @@ begin
     end;
     if numUndo = 0 then
       mustUndo := false
-    else if numUndo = BlockEnd.Y + 1 - BlockBegin.Y then
+    else if numUndo = Carets[0].EndY - CaretY then
       mustUndo := true;
-    BeginUndoBlock;
-    for i := BlockBegin.Y to BlockEnd.Y do
+    strings.BeginUndoGroup;
+    for i := caretY to Carets[0].EndY + 1 do
     begin
       pt.Y:= i;
-      ExecuteCommand(ecGotoXY, '', @pt);
+      caretXY := pt;
       while CaretX < pt.X do
-        ExecuteCommand(ecChar, ' ', nil);
+        DoCommand(cCommand_TextInsert, ' ');
       if not mustUndo then
-      begin
-        commentHere;
-      end
+        commentHere
       else
         unCommentHere;
     end;
@@ -1502,7 +1668,7 @@ begin
     else
       cp.X -= 2;
     CaretXY := cp;
-    EndUndoBlock;
+    strings.EndUndoGroup;
   end;
 end;
 
@@ -1515,73 +1681,73 @@ var
   comment:boolean = true;
   attrib: TSynHighlighterAttributes;
 begin
-  if not GetHighlighterAttriAtRowColEx(CaretXY, str, x0, x, attrib) then
-    exit;
-  if str.isEmpty then
-    exit;
-
-  str := LineText;
-  x := LogicalCaretXY.X;
-
-  ExecuteCommand(ecWordEndRight, #0, nil);
-  x1 := LogicalCaretXY.X;
-  while true do
-  begin
-    if (str[x1] in ['*', '+']) and (x1 < str.length) and (str[x1+1] = '/') then
-    begin
-      comEnd:=true;
-      break;
-    end;
-    if not isBlank(str[x1]) then
-      break;
-    ExecuteCommand(ecRight, #0, nil);
-    x1 += 1;
-    if x1 = str.length then
-      break;
-  end;
-
-  LogicalCaretXY := point(x, LogicalCaretXY.Y);
-  ExecuteCommand(ecWordLeft, #0, nil);
-  x0 := LogicalCaretXY.X - 1;
-  if (x0 > 1) then while true do
-  begin
-    if (x0 > 1) and (str[x0] in ['*', '+']) and (str[x0-1] = '/') then
-    begin
-      x0 -= 1;
-      comBeg:=true;
-      break;
-    end;
-    if not isBlank(str[x0]) then
-      break;
-    ExecuteCommand(ecLeft, #0, nil);
-    x0 -= 1;
-    if x0 = 1 then
-      break;
-  end;
-
-  comment := not comBeg and not comEnd;
-  LogicalCaretXY := point(x, LogicalCaretXY.Y);
-  if comment then
-  begin
-    BeginUndoBlock;
-    ExecuteCommand(ecWordLeft, '', nil);
-    ExecuteCommand(ecChar, '/', nil);
-    ExecuteCommand(ecChar, '*', nil);
-    ExecuteCommand(ecWordEndRight, '', nil);
-    ExecuteCommand(ecChar, '*', nil);
-    ExecuteCommand(ecChar, '/', nil);
-    EndUndoBlock;
-  end else
-  begin
-    BeginUndoBlock;
-    LogicalCaretXY := point(x1, LogicalCaretXY.Y);
-    ExecuteCommand(ecDeleteChar, '', nil);
-    ExecuteCommand(ecDeleteChar, '', nil);
-    LogicalCaretXY := point(x0, LogicalCaretXY.Y);
-    ExecuteCommand(ecDeleteChar, '', nil);
-    ExecuteCommand(ecDeleteChar, '', nil);
-    EndUndoBlock;
-  end;
+  //if not GetHighlighterAttriAtRowColEx(CaretXY, str, x0, x, attrib) then
+  //  exit;
+  //if str.isEmpty then
+  //  exit;
+  //
+  //str := LineText;
+  //x := LogicalCaretXY.X;
+  //
+  //ExecuteCommand(ecWordEndRight, #0, nil);
+  //x1 := LogicalCaretXY.X;
+  //while true do
+  //begin
+  //  if (str[x1] in ['*', '+']) and (x1 < str.length) and (str[x1+1] = '/') then
+  //  begin
+  //    comEnd:=true;
+  //    break;
+  //  end;
+  //  if not isBlank(str[x1]) then
+  //    break;
+  //  ExecuteCommand(ecRight, #0, nil);
+  //  x1 += 1;
+  //  if x1 = str.length then
+  //    break;
+  //end;
+  //
+  //LogicalCaretXY := point(x, LogicalCaretXY.Y);
+  //ExecuteCommand(ecWordLeft, #0, nil);
+  //x0 := LogicalCaretXY.X - 1;
+  //if (x0 > 1) then while true do
+  //begin
+  //  if (x0 > 1) and (str[x0] in ['*', '+']) and (str[x0-1] = '/') then
+  //  begin
+  //    x0 -= 1;
+  //    comBeg:=true;
+  //    break;
+  //  end;
+  //  if not isBlank(str[x0]) then
+  //    break;
+  //  ExecuteCommand(ecLeft, #0, nil);
+  //  x0 -= 1;
+  //  if x0 = 1 then
+  //    break;
+  //end;
+  //
+  //comment := not comBeg and not comEnd;
+  //LogicalCaretXY := point(x, LogicalCaretXY.Y);
+  //if comment then
+  //begin
+  //  BeginUndoBlock;
+  //  ExecuteCommand(ecWordLeft, '', nil);
+  //  ExecuteCommand(ecChar, '/', nil);
+  //  ExecuteCommand(ecChar, '*', nil);
+  //  ExecuteCommand(ecWordEndRight, '', nil);
+  //  ExecuteCommand(ecChar, '*', nil);
+  //  ExecuteCommand(ecChar, '/', nil);
+  //  EndUndoBlock;
+  //end else
+  //begin
+  //  BeginUndoBlock;
+  //  LogicalCaretXY := point(x1, LogicalCaretXY.Y);
+  //  ExecuteCommand(ecDeleteChar, '', nil);
+  //  ExecuteCommand(ecDeleteChar, '', nil);
+  //  LogicalCaretXY := point(x0, LogicalCaretXY.Y);
+  //  ExecuteCommand(ecDeleteChar, '', nil);
+  //  ExecuteCommand(ecDeleteChar, '', nil);
+  //  EndUndoBlock;
+  //end;
 end;
 
 procedure TCESynMemo.invertVersionAllNone;
@@ -1590,16 +1756,17 @@ var
   c: char;
   tok, tok1, tok2: PLexToken;
   cp, st, nd: TPoint;
+  p0, p1: TPoint;
   sel: boolean;
 begin
   fLexToks.Clear;
-  lex(lines.Text, fLexToks, nil, [lxoNoComments]);
+  lex(Strings.TextString_UTF8, fLexToks, nil, [lxoNoComments]);
   cp := CaretXY;
-  if SelAvail then
+  if Carets[0].EndX <> -1 then
   begin
     sel := true;
-    st := BlockBegin;
-    nd := BlockEnd;
+    st := caretXY;
+    nd := point(Carets[0].EndX + 1, Carets[0].EndY + 1);
   end else
   begin
     sel := false;
@@ -1623,22 +1790,22 @@ begin
     if  ((tok1^.kind = ltkKeyword) and (tok1^.data = 'version')
       and (tok2^.kind = ltkSymbol) and (tok2^.data = '(')) then
     begin
-      BeginUndoBlock;
-      LogicalCaretXY := tok^.position;
-      CaretX:=CaretX+1;
+      strings.BeginUndoGroup;
+      caretXY := tok^.position;
+      CaretY := CaretY-1;
       case tok^.Data of
         'all':
         begin
-          for c in 'all'  do ExecuteCommand(ecDeleteChar, '', nil);
-          for c in 'none' do ExecuteCommand(ecChar, c, nil);
+          strings.TextDeleteRange(CaretX, CaretY, CaretX + 3, CaretY, p0, p1);
+          strings.TextInsert(CaretX, CaretY, 'none', false, p0, p1);
         end;
         'none':
         begin
-          for c in 'none' do ExecuteCommand(ecDeleteChar, '', nil);
-          for c in 'all'  do ExecuteCommand(ecChar, c, nil);
+          strings.TextDeleteRange(CaretX, CaretY, CaretX + 4, CaretY, p0, p1);
+          strings.TextInsert(CaretX, CaretY, 'all', false, p0, p1);
         end;
       end;
-      EndUndoBlock;
+      strings.EndUndoGroup;
     end;
   end;
   CaretXY := cp;
@@ -1651,14 +1818,19 @@ var
   i, j, loc: integer;
   p: TPoint;
   c: char;
+const
+  IdentChars = ['a'..'z', 'A'..'Z', '0'..'9', '_'];
 begin
   if not DcdWrapper.available then
     exit;
+
   p := CaretXY;
-  line := lineText;
-  if (CaretX = 1) or not (line[LogicalCaretXY.X] in IdentChars) or
-    not (line[LogicalCaretXY.X-1] in IdentChars)  then exit;
-  old := GetWordAtRowCol(LogicalCaretXY);
+  line := lineTextAtCarret;
+  if (CaretX = 1) or not (line[caretX] in IdentChars) or
+    not (line[caretX-1] in IdentChars) then
+      exit;
+
+  old := TextCurrentWord;
   DcdWrapper.getLocalSymbolUsageFromCursor(locs);
   if length(locs) = 0 then
   begin
@@ -1671,20 +1843,21 @@ begin
   if idt.isEmpty or idt.isBlank then
     exit;
 
+  Strings.BeginUndoGroup;
   for i:= high(locs) downto 0 do
   begin
     loc := locs[i];
     if loc = -1 then
       continue;
-    BeginUndoBlock;
-    SelStart := loc + 1;
+
+    caretBytePosition := loc;
     for j in [0..old.length-1] do
-      ExecuteCommand(ecDeleteChar, '', nil);
-    for c in idt do
-      ExecuteCommand(ecChar, c, nil);
-    EndUndoBlock;
-    CaretXY := p;
+      DoCommand(cCommand_KeyDelete);
+    DoCommand(cCommand_TextInsert, idt);
   end;
+  strings.EndUndoGroup;
+
+  CaretXY := p;
 end;
 
 procedure TCESynMemo.ShowPhobosDoc;
@@ -1836,10 +2009,9 @@ begin
     begin
       if i < 1 then
         i := 1
-      else if i > lines.Count then
-        i := lines.Count;
+      else if i > Strings.Count then
+        i := Strings.Count;
       CaretY:= i;
-      EnsureCursorPosVisible;
     end;
   end;
 end;
@@ -1855,7 +2027,7 @@ begin
   begin
     p.x := 0;
     p.y := line;
-    p := RowColumnToPixels(p);
+    p := CaretPosToClientPos(p);
     c := ClientToScreen(c);
     p.Offset(c);
     s := 'Warning(s):' + LineEnding + s;
@@ -1874,41 +2046,43 @@ end;
 procedure TCESynMemo.goToChangedArea(next: boolean);
 var
   i: integer;
-  s: TSynLineState;
+  s: TATLineState;
   d: integer;
   b: integer = 0;
   p: TPoint;
 begin
   i := CaretY - 1;
-  s := GetLineState(i);
+  s := Strings.LinesState[i];
   case next of
-    true: begin d := 1; b := lines.count-1; end;
+    true: begin d := 1; b := Strings.count-1; end;
     false:d := -1;
   end;
   if i = b then
     exit;
   // exit the current area if it's modified
-  while s <> slsNone do
+  while s <> cLineStateNone do
   begin
-    s := GetLineState(i);
+    s := Strings.LinesState[i];
     if i = b then
       exit;
     i += d;
   end;
   // find next modified area
-  while s = slsNone do
+  while s = cLineStateNone do
   begin
-    s := GetLineState(i);
+    s := Strings.LinesState[i];
     if i = b then
       break;
     i += d;
   end;
   // goto area beg/end
-  if (s <> slsNone) and (i <> CaretY + 1) then
+  if (s <> cLineStateNone) and (i <> CaretY + 1) then
   begin
     p.X:= 1;
     p.Y:= i + 1 - d;
-    ExecuteCommand(ecGotoXY, #0, @p);
+    caretXY := p;
+    //NOTE-csynedit: Was undoable GOTO necessary here ?
+    //ExecuteCommand(ecGotoXY, #0, @p);
   end;
 end;
 
@@ -1919,8 +2093,8 @@ var
   tk: PLexToken = nil;
 begin
   fLexToks.Clear;
-  lex(Lines.Text, fLexToks, nil, [lxoNoComments, lxoNoWhites]);
-  for i:=0 to fLexToks.Count-2 do
+  lex(Strings.TextString_UTF8, fLexToks, nil, [lxoNoComments, lxoNoWhites]);
+  for i:= 0 to fLexToks.Count-2 do
   begin
     tk0 := fLexToks[i];
     tk1 := fLexToks[i+1];
@@ -1943,7 +2117,11 @@ begin
     end;
   end;
   if assigned(tk) then
-    ExecuteCommand(ecGotoXY, #0, @tk^.position);
+  begin
+    //NOTE-csynedit: Was undoable GOTO necessary here ?
+    //ExecuteCommand(ecGotoXY, #0, @tk^.position);
+    caretXY := tk^.position;
+  end;
 end;
 
 procedure TCESynMemo.goToWarning(next: boolean);
@@ -1962,7 +2140,7 @@ begin
     if j <> -1 then
     begin
       CaretY:= fDscannerResults.item[j]^.line;
-      EnsureCursorPosVisible;
+      //EnsureCursorPosVisible;
     end;
   end
   else
@@ -1976,7 +2154,7 @@ begin
     if (j <> -1) and (j < fDscannerResults.count) then
     begin
       CaretY:= fDscannerResults.item[j]^.line;
-      EnsureCursorPosVisible;
+      //EnsureCursorPosVisible;
     end;
   end;
 end;
@@ -1999,7 +2177,7 @@ var
 begin
   if fDastWorxExename.length = 0 then
     exit(mainDefaultBehavior);
-  src := Lines.Text;
+  src := Strings.TextString_UTF8;
   prc := TProcess.Create(nil);
   try
     prc.Executable:= fDastWorxExename;
@@ -2030,8 +2208,8 @@ begin
   fLexToks.Clear;
   if value in [autoCloseBackTick, autoCloseDoubleQuote] then
   begin
-    p := selStart;
-    lex(Lines.Text, fLexToks);
+    p := caretBytePosition;
+    lex(strings.TextString_UTF8, fLexToks);
     for i:=0 to fLexToks.Count-2 do
     begin
       tk0 := fLexToks[i];
@@ -2046,8 +2224,8 @@ begin
   end
   else if value = autoCloseSingleQuote then
   begin
-    p := selStart;
-    lex(Lines.Text, fLexToks);
+    p := caretBytePosition;
+    lex(strings.TextString_UTF8, fLexToks);
     for i:=0 to fLexToks.Count-2 do
     begin
       tk0 := fLexToks[i];
@@ -2062,8 +2240,8 @@ begin
   end
   else if value = autoCloseSquareBracket then
   begin
-    p := selStart;
-    lex(Lines.Text, fLexToks);
+    p := caretBytePosition;
+    lex(strings.TextString_UTF8, fLexToks);
     for i:=0 to fLexToks.Count-2 do
     begin
       tk0 := fLexToks[i];
@@ -2075,15 +2253,15 @@ begin
     tk0 := fLexToks[fLexToks.Count-1];
     if (tk0^.offset+1 <= p) and (tk0^.kind <> ltkIllegal) then
       exit;
-    str := lineText;
-    i := LogicalCaretXY.X;
-    if (i <= str.length) and (lineText[i] = ']') then
+    str := lineTextAtCarret;
+    i := caretBytePosition;
+    if (i <= str.length) and (str[i] = ']') then
       exit;
   end;
-  BeginUndoBlock;
-  ExecuteCommand(ecChar, autoClosePair2Char[value], nil);
-  ExecuteCommand(ecLeft, #0, nil);
-  EndUndoBlock;
+  strings.BeginUndoGroup;
+  DoCommand(cCommand_TextInsert, autoClosePair2Char[value]);
+  DoCommand(cCommand_KeyLeft);
+  strings.EndUndoGroup;
 end;
 
 procedure TCESynMemo.setSelectionOrWordCase(upper: boolean);
@@ -2091,37 +2269,37 @@ var
   i: integer;
   txt: string;
 begin
-  if SelAvail then
-  begin
-    BeginUndoBlock;
-    case upper of
-      false: txt := UTF8LowerString(SelText);
-      true:  txt := UTF8UpperString(SelText);
-    end;
-    ExecuteCommand(ecBlockDelete, #0, nil);
-    for i:= 1 to txt.length do
-    case txt[i] of
-      #13: continue;
-      #10: ExecuteCommand(ecLineBreak, #0, nil);
-      else ExecuteCommand(ecChar, txt[i], nil);
-    end;
-    EndUndoBlock;
-  end else
-  begin
-    txt := GetWordAtRowCol(LogicalCaretXY);
-    if txt.isBlank then
-      exit;
-    BeginUndoBlock;
-    ExecuteCommand(ecWordLeft, #0, nil);
-    case upper of
-      false: txt := UTF8LowerString(txt);
-      true:  txt := UTF8UpperString(txt);
-    end;
-    ExecuteCommand(ecDeleteWord, #0, nil);
-    for i:= 1 to txt.length do
-      ExecuteCommand(ecChar, txt[i], nil);
-    EndUndoBlock;
-  end;
+  //if SelAvail then
+  //begin
+  //  BeginUndoBlock;
+  //  case upper of
+  //    false: txt := UTF8LowerString(SelText);
+  //    true:  txt := UTF8UpperString(SelText);
+  //  end;
+  //  ExecuteCommand(ecBlockDelete, #0, nil);
+  //  for i:= 1 to txt.length do
+  //  case txt[i] of
+  //    #13: continue;
+  //    #10: ExecuteCommand(ecLineBreak, #0, nil);
+  //    else ExecuteCommand(ecChar, txt[i], nil);
+  //  end;
+  //  EndUndoBlock;
+  //end else
+  //begin
+  //  txt := GetWordAtRowCol(LogicalCaretXY);
+  //  if txt.isBlank then
+  //    exit;
+  //  BeginUndoBlock;
+  //  ExecuteCommand(ecWordLeft, #0, nil);
+  //  case upper of
+  //    false: txt := UTF8LowerString(txt);
+  //    true:  txt := UTF8UpperString(txt);
+  //  end;
+  //  ExecuteCommand(ecDeleteWord, #0, nil);
+  //  for i:= 1 to txt.length do
+  //    ExecuteCommand(ecChar, txt[i], nil);
+  //  EndUndoBlock;
+  //end;
 end;
 
 procedure TCESynMemo.sortSelectedLines(descending, caseSensitive: boolean);
@@ -2131,43 +2309,43 @@ var
   lst: TStringListUTF8;
   pt0: TPoint;
 begin
-  if BlockEnd.Y - BlockBegin.Y < 1 then
-    exit;
-  lst := TStringListUTF8.Create;
-  try
-    BeginUndoBlock;
-    for i:= BlockBegin.Y-1 to BlockEnd.Y-1 do
-      lst.Add(lines[i]);
-    pt0 := BlockBegin;
-    pt0.X:=1;
-    ExecuteCommand(ecGotoXY, #0, @pt0);
-    lst.CaseSensitive:=caseSensitive;
-    if not caseSensitive then
-      lst.Sorted:=true;
-    case descending of
-      false: for i:= 0 to lst.Count-1 do
-        begin
-          ExecuteCommand(ecDeleteLine, #0, nil);
-          ExecuteCommand(ecInsertLine, #0, nil);
-          lne := lst[i];
-          for j := 1 to lne.length do
-            ExecuteCommand(ecChar, lne[j], nil);
-          ExecuteCommand(ecDown, #0, nil);
-        end;
-      true: for i:= lst.Count-1 downto 0 do
-        begin
-          ExecuteCommand(ecDeleteLine, #0, nil);
-          ExecuteCommand(ecInsertLine, #0, nil);
-          lne := lst[i];
-          for j := 1 to lne.length do
-            ExecuteCommand(ecChar, lne[j], nil);
-          ExecuteCommand(ecDown, #0, nil);
-        end;
-    end;
-    EndUndoBlock;
-  finally
-    lst.Free;
-  end;
+  //if BlockEnd.Y - BlockBegin.Y < 1 then
+  //  exit;
+  //lst := TStringListUTF8.Create;
+  //try
+  //  BeginUndoBlock;
+  //  for i:= BlockBegin.Y-1 to BlockEnd.Y-1 do
+  //    lst.Add(lines[i]);
+  //  pt0 := BlockBegin;
+  //  pt0.X:=1;
+  //  ExecuteCommand(ecGotoXY, #0, @pt0);
+  //  lst.CaseSensitive:=caseSensitive;
+  //  if not caseSensitive then
+  //    lst.Sorted:=true;
+  //  case descending of
+  //    false: for i:= 0 to lst.Count-1 do
+  //      begin
+  //        ExecuteCommand(ecDeleteLine, #0, nil);
+  //        ExecuteCommand(ecInsertLine, #0, nil);
+  //        lne := lst[i];
+  //        for j := 1 to lne.length do
+  //          ExecuteCommand(ecChar, lne[j], nil);
+  //        ExecuteCommand(ecDown, #0, nil);
+  //      end;
+  //    true: for i:= lst.Count-1 downto 0 do
+  //      begin
+  //        ExecuteCommand(ecDeleteLine, #0, nil);
+  //        ExecuteCommand(ecInsertLine, #0, nil);
+  //        lne := lst[i];
+  //        for j := 1 to lne.length do
+  //          ExecuteCommand(ecChar, lne[j], nil);
+  //        ExecuteCommand(ecDown, #0, nil);
+  //      end;
+  //  end;
+  //  EndUndoBlock;
+  //finally
+  //  lst.Free;
+  //end;
 end;
 
 procedure TCESynMemo.sortLines;
@@ -2208,25 +2386,28 @@ var
 begin
   d := TStringList.Create;
   try
-    getDdocTemplate(lines, d, CaretY, fInsertPlusDdoc);
+    getDdocTemplate(Strings.TextString_UTF8, d, CaretY, fInsertPlusDdoc);
     if d.Text.isNotEmpty then
     begin
-      BeginUndoBlock;
-      ExecuteCommand(ecLineStart, #0, nil);
+      strings.BeginUndoGroup;
+      DoCommand(cCommand_KeyHome);
       k := CaretX;
       p.y:= CaretY -1 ;
-      p.x:= 1 ;
-      ExecuteCommand(ecGotoXY, #0, @p);
+      p.x:= 0 ;
+
+      caretXY := p ;
+      //ExecuteCommand(ecGotoXY, #0, @p);
+
       for i := 0 to d.Count-1 do
       begin
         s := d[i];
-        ExecuteCommand(ecLineBreak, #0, nil);
+        DoCommand(cCommand_KeyEnter);
+        caretX := 1;
         while caretX < k do
-          ExecuteCommand(ecTab, #0, nil);
-        for j := 1 to s.length do
-          ExecuteCommand(ecChar, s[j], nil);
+          DoCommand(cCommand_KeyTab);
+        DoCommand(cCommand_TextInsert, s);
       end;
-      EndUndoBlock;
+      strings.EndUndoGroup;
     end;
   finally
     d.Free;
@@ -2260,7 +2441,7 @@ begin
     exit;
   if not fCallTipWin.Visible then
     fCallTipStrings.Clear;
-  str := LineText[1..CaretX];
+  str := lineTextAtCarret[1..CaretX];
   x := CaretX;
   i := x;
   if findOpenParen then while true do
@@ -2269,11 +2450,11 @@ begin
       break;
     if str[i-1] = '(' then
     begin
-      LogicalCaretXY := Point(i, CaretY);
+      caretXY := Point(i, CaretY);
       break;
     end;
     if str[i] = #9 then
-      i -= TabWidth
+      i -= self.OptTabSize
     else
       i -= 1;
   end;
@@ -2307,15 +2488,15 @@ end;
 
 procedure TCESynMemo.showCallTips(const tips: string);
 var
-  pnt: TPoint;
+  p: TPoint;
 begin
   if (not fIsDSource and not alwaysAdvancedFeatures) or tips.isEmpty then
     exit;
 
-  pnt := ClientToScreen(point(CaretXPix, CaretYPix));
+  p := ClientToScreen(point(Carets[0].CoordX, Carets[0].CoordY));
   fCallTipWin.FontSize := Font.Size;
   fCallTipWin.HintRect := fCallTipWin.CalcHintRect(0, tips, nil);
-  fCallTipWin.OffsetHintRect(pnt, Font.Size * 2);
+  fCallTipWin.OffsetHintRect(p, Font.Size * 2);
   fCallTipWin.ActivateHint(tips);
 end;
 
@@ -2487,7 +2668,7 @@ begin
     exit;
 
   fCanAutoDot := false;
-  fCompletion.Execute('', ClientToScreen(point(CaretXPix, CaretYPix + LineHeight)));
+  //fCompletion.Execute('', ClientToScreen(point(CaretXPix, CaretYPix + LineHeight)));
 end;
 
 procedure TCESynMemo.setAutoDotDelay(value: Integer);
@@ -2561,7 +2742,7 @@ begin
   removeDscannerWarnings;
   fCanDscan := false;
   fDScanner.execute;
-  s := Lines.strictText;
+  s := Strings.TextString_UTF8;
   if s.length > 0 then
     fDscanner.Input.Write(s[1], s.length);
   fDscanner.CloseInput;
@@ -2609,17 +2790,17 @@ var
   i: integer;
   n: TSynEditMark;
 begin
-  IncPaintLock;
+  //IncPaintLock;
   fDscannerResults.clear;
-  for i:= Marks.Count-1 downto 0 do
-    if marks.Items[i].ImageIndex = longint(giWarn) then
-  begin
-    n := marks.Items[i];
-    marks.Delete(i);
-    FreeAndNil(n);
-  end;
-  DecPaintLock;
-  repaint;
+  //for i:= Marks.Count-1 downto 0 do
+  //  if marks.Items[i].ImageIndex = longint(giWarn) then
+  //begin
+  //  n := marks.Items[i];
+  //  marks.Delete(i);
+  //  FreeAndNil(n);
+  //end;
+  //DecPaintLock;
+  //repaint;
 end;
 
 function TCESynMemo.getDscannerWarning(line: integer): string;
@@ -2648,20 +2829,20 @@ end;
 {$REGION Coedit memo things ----------------------------------------------------}
 procedure TCESynMemo.handleStatusChanged(Sender: TObject; Changes: TSynStatusChanges);
 begin
-  if scOptions in Changes then
-  begin
-    if fSmartDdocNewline and not (eoAutoIndent in Options) then
-      Options := Options + [eoAutoIndent];
-    if Beautifier.isNotNil and (Beautifier is TSynBeautifier) then
-    begin
-      if not (eoTabsToSpaces in Options) and not (eoSpacesToTabs in Options) then
-        TSynBeautifier(Beautifier).IndentType := sbitConvertToTabOnly
-      else if eoSpacesToTabs in options then
-        TSynBeautifier(Beautifier).IndentType := sbitConvertToTabOnly
-      else
-        TSynBeautifier(Beautifier).IndentType := sbitSpace;
-    end;
-  end;
+  //if scOptions in Changes then
+  //begin
+  //  if fSmartDdocNewline and not (eoAutoIndent in Options) then
+  //    Options := Options + [eoAutoIndent];
+  //  if Beautifier.isNotNil and (Beautifier is TSynBeautifier) then
+  //  begin
+  //    if not (eoTabsToSpaces in Options) and not (eoSpacesToTabs in Options) then
+  //      TSynBeautifier(Beautifier).IndentType := sbitConvertToTabOnly
+  //    else if eoSpacesToTabs in options then
+  //      TSynBeautifier(Beautifier).IndentType := sbitConvertToTabOnly
+  //    else
+  //      TSynBeautifier(Beautifier).IndentType := sbitSpace;
+  //  end;
+  //end;
 end;
 
 function TCESynMemo.pageCaption(checkModule: boolean): string;
@@ -2671,7 +2852,7 @@ begin
   if checkModule and isDSource then
   begin
     fLexToks.Clear;
-    lex(Lines.Text, fLexToks, @tokFoundForCaption, [lxoNoComments]);
+    lex(Strings.TextString_UTF8, fLexToks, @tokFoundForCaption, [lxoNoComments]);
     if fHasModuleDeclaration then
       result := getModuleName(fLexToks);
   end;
@@ -2711,7 +2892,7 @@ var
   r: TStringRange = (ptr:nil; pos:0; len: 0);
 begin
   result := #0;
-  p := SelStart;
+  p := caretBytePosition;
   for i := 0 to fLexToks.Count-1 do
   begin
     tk1 := fLexToks[i];
@@ -2752,7 +2933,7 @@ var
   ton: PLexToken = nil;
   bet: boolean;
 begin
-  p := SelStart;
+  p := caretBytePosition;
   for i := 0 to fLexToks.Count-1 do
   begin
     tok := fLexToks[i];
@@ -2760,8 +2941,8 @@ begin
     begin
       ton := fLexToks[i+1];
       bet := (tok^.offset + 1 <= p) and (p < ton^.offset + 2);
-    end else
-      bet := false;
+    end
+    else bet := false;
     if bet and (tok^.kind = ltkComment) then
       exit(false);
     c += byte((tok^.kind = TLexTokenKind.ltkSymbol) and (((tok^.Data = '{')) or (tok^.Data = 'q{')));
@@ -2778,8 +2959,8 @@ end;
 procedure TCESynMemo.SetHighlighter(const Value: TSynCustomHighlighter);
 begin
   inherited;
-  fIsDSource := Highlighter = fD2Highlighter;
-  fIsTxtFile := Highlighter = fTxtHighlighter;
+  //fIsDSource := Highlighter = fD2Highlighter;
+  //fIsTxtFile := Highlighter = fTxtHighlighter;
 end;
 
 procedure TCESynMemo.highlightCurrentIdentifier;
@@ -2787,24 +2968,24 @@ var
   str: string;
   i: integer;
 begin
-  fIdentifier := GetWordAtRowCol(LogicalCaretXY);
-  if (fIdentifier.length > 2) and (not SelAvail) then
-    SetHighlightSearch(fIdentifier, fMatchIdentOpts)
-  else if SelAvail and (BlockBegin.Y = BlockEnd.Y) then
-  begin
-    str := SelText;
-    for i := 1 to str.length do
-    begin
-      if not (str[i] in [' ', #10, #13]) then
-      begin
-        SetHighlightSearch(str, fMatchSelectionOpts);
-        break;
-      end;
-      if i = str.length then
-        SetHighlightSearch('', []);
-    end;
-  end
-  else SetHighlightSearch('', []);
+  //fIdentifier := GetWordAtRowCol(LogicalCaretXY);
+  //if (fIdentifier.length > 2) and (not SelAvail) then
+  //  SetHighlightSearch(fIdentifier, fMatchIdentOpts)
+  //else if SelAvail and (BlockBegin.Y = BlockEnd.Y) then
+  //begin
+  //  str := SelText;
+  //  for i := 1 to str.length do
+  //  begin
+  //    if not (str[i] in [' ', #10, #13]) then
+  //    begin
+  //      SetHighlightSearch(str, fMatchSelectionOpts);
+  //      break;
+  //    end;
+  //    if i = str.length then
+  //      SetHighlightSearch('', []);
+  //  end;
+  //end
+  //else SetHighlightSearch('', []);
 end;
 
 procedure TCESynMemo.setMatchOpts(value: TIdentifierMatchOptions);
@@ -2817,25 +2998,24 @@ end;
 procedure TCESynMemo.changeNotify(Sender: TObject);
 begin
   highlightCurrentIdentifier;
-  fModified := true;
-  fPositions.store;
   subjDocChanged(TCEMultiDocSubject(fMultiDocSubject), self);
 end;
 
 procedure TCESynMemo.loadFromFile(const fname: string);
 var
   ext: string;
+  imd: TIndentationMode;
 begin
   ext := fname.extractFileExt;
   fIsDsource := hasDlangSyntax(ext);
-  if not fIsDsource then
-    Highlighter := TxtSyn;
-  Lines.LoadFromFile(fname);
+  //if not fIsDsource then
+  //  Highlighter := TxtSyn;
+  inherited LoadFromFile(fname);
   fFilename := fname;
   FileAge(fFilename, fFileDate);
-  ReadOnly := FileIsReadOnly(fFilename);
+  ModeReadOnly := FileIsReadOnly(fFilename);
 
-  fModified := false;
+  modified := false;
   if Showing then
   begin
     setFocus;
@@ -2844,9 +3024,12 @@ begin
   end;
   if detectIndentMode then
   begin
-    case indentationMode(lines) of
-      imTabs: Options:= Options - [eoTabsToSpaces];
-      imSpaces: Options:= Options + [eoTabsToSpaces];
+    imd := indentationMode();
+    case imd of
+      imTabs: OptTabSpaces:= false;
+      imSpaces: OptTabSpaces:= true;
+      // TODO: ask for conversion if result is imMixed
+      imMixed: begin end;
     end;
   end;
   subjDocChanged(TCEMultiDocSubject(fMultiDocSubject), self);
@@ -2863,17 +3046,17 @@ begin
     getMessageDisplay.message('No write access in: ' + ext, self, amcEdit, amkWarn);
     exit;
   end;
-  ReadOnly := false;
-  Lines.SaveToFile(fname);
+  ModeReadOnly := false;
+  inherited SaveToFile(fname);
   fFilename := fname;
   ext := fname.extractFileExt;
   fIsDsource := hasDlangSyntax(ext);
-  if fIsDsource then
-    Highlighter := fD2Highlighter
-  else if not isProjectDescription then
-    Highlighter := TxtHighlighter;
+  //if fIsDsource then
+  //  Highlighter := fD2Highlighter
+  //else if not isProjectDescription then
+  //  Highlighter := TxtHighlighter;
   FileAge(fFilename, fFileDate);
-  fModified := false;
+  modified := false;
   if fFilename <> fTempFileName then
   begin
     if fTempFileName.fileExists then
@@ -2884,11 +3067,11 @@ end;
 
 procedure TCESynMemo.save;
 begin
-  if readOnly then
+  if ModeReadOnly then
     exit;
-  Lines.SaveToFile(fFilename);
+  inherited saveToFile(fFilename);
   FileAge(fFilename, fFileDate);
-  fModified := false;
+  modified := false;
   if fFilename <> fTempFileName then
     subjDocChanged(TCEMultiDocSubject(fMultiDocSubject), self);
 end;
@@ -2896,7 +3079,7 @@ end;
 procedure TCESynMemo.saveTempFile;
 begin
   saveToFile(fTempFileName);
-  fModified := false;
+  modified := false;
 end;
 
 function TCESynMemo.getIfTemp: boolean;
@@ -2957,13 +3140,13 @@ var
   e: TPoint;
   p: TPoint;
 begin
-  p := CaretXY;
-  b := point(1,1);
-  e := Point(length(Lines[lines.Count-1])+1,lines.Count);
-  TextBetweenPoints[b,e] := value;
-  CaretXY := p;
-  EnsureCursorPosVisible;
-  fModified := true;
+  //p := CaretXY;
+  //b := point(1,1);
+  //e := Point(length(Lines[lines.Count-1])+1,lines.Count);
+  //TextBetweenPoints[b,e] := value;
+  //CaretXY := p;
+  //EnsureCursorPosVisible;
+  //modified := true;
 end;
 
 procedure TCESynMemo.checkFileDate;
@@ -2975,66 +3158,68 @@ var
   str: TStringList;
   txt: string;
 begin
-  if fDiffDialogWillClose or fDisableFileDateCheck then
-    exit;
-  if fFilename.isNotEmpty and not fFilename.fileExists and
-    (fFilename <> '<new document>') then
-  begin
-    // cant use a dialog: dialog closed -> doc focused -> warn again, etc
-    getMessageDisplay.message(fFilename + ' does not exist anymore', self, amcEdit, amkWarn);
-  end;
-  if (fFilename = fTempFileName) or fDisableFileDateCheck
-    or not FileAge(fFilename, newDate) or (fFileDate = newDate) then
-      exit;
-  if (fFileDate <> 0.0) then
-  begin
-    str := TStringList.Create;
-    try
-      str.LoadFromFile(fFilename);
-      txt := str.strictText;
-      newMd5 := MD5String(txt);
-      txt := lines.strictText;
-      curMd5 := MD5String(txt);
-      if not MDMatch(curMd5, newMd5) then
-      begin
-        lines.SaveToFile(tempFilename);
-        fDiffDialogWillClose := true;
-        With TCEDiffViewer.construct(self, fTempFileName, fFilename) do
-        try
-          mr := ShowModal;
-          case mr of
-            mrOK:
-            begin
-              replaceUndoableContent(str.strictText);
-              fFileDate := newDate;
-            end;
-            mrIgnore: fFileDate := newDate;
-            mrCancel:;
-          end;
-        finally
-          free;
-          fDiffDialogWillClose := false;
-        end;
-      end;
-    finally
-      str.Free;
-    end;
-  end
-  else fFileDate := newDate;
+  //if fDiffDialogWillClose or fDisableFileDateCheck then
+  //  exit;
+  //if fFilename.isNotEmpty and not fFilename.fileExists and
+  //  (fFilename <> '<new document>') then
+  //begin
+  //  // cant use a dialog: dialog closed -> doc focused -> warn again, etc
+  //  getMessageDisplay.message(fFilename + ' does not exist anymore', self, amcEdit, amkWarn);
+  //end;
+  //if (fFilename = fTempFileName) or fDisableFileDateCheck
+  //  or not FileAge(fFilename, newDate) or (fFileDate = newDate) then
+  //    exit;
+  //if (fFileDate <> 0.0) then
+  //begin
+  //  str := TStringList.Create;
+  //  try
+  //    str.LoadFromFile(fFilename);
+  //    txt := str.strictText;
+  //    newMd5 := MD5String(txt);
+  //    txt := lines.strictText;
+  //    curMd5 := MD5String(txt);
+  //    if not MDMatch(curMd5, newMd5) then
+  //    begin
+  //      lines.SaveToFile(tempFilename);
+  //      fDiffDialogWillClose := true;
+  //      With TCEDiffViewer.construct(self, fTempFileName, fFilename) do
+  //      try
+  //        mr := ShowModal;
+  //        case mr of
+  //          mrOK:
+  //          begin
+  //            replaceUndoableContent(str.strictText);
+  //            fFileDate := newDate;
+  //          end;
+  //          mrIgnore: fFileDate := newDate;
+  //          mrCancel:;
+  //        end;
+  //      finally
+  //        free;
+  //        fDiffDialogWillClose := false;
+  //      end;
+  //    end;
+  //  finally
+  //    str.Free;
+  //  end;
+  //end
+  //else fFileDate := newDate;
 end;
 
 function TCESynMemo.getMouseBytePosition: Integer;
 var
-  i, len, llen: Integer;
+  x: integer;
+  y: integer;
+  i: integer;
 begin
   result := 0;
-  if fMousePos.y-1 > Lines.Count-1 then exit;
-  llen := Lines[fMousePos.y-1].length;
-  if fMousePos.X > llen  then exit;
-  len := getSysLineEndLen;
-  for i:= 0 to fMousePos.y-2 do
-    result += Lines[i].length + len;
-  result += fMousePos.x;
+  x := fMousePos.x;
+  y := fMousePos.y;
+  if (x - 1 > strings.LinesLen[y]) or (y > Strings.Count-1) then
+    exit;
+  for i:= 0 to y-1 do
+    result += Strings.LinesLenPhysical[i];
+  result += x;
 end;
 
 procedure TCESynMemo.patchClipboardIndentation;
@@ -3043,31 +3228,31 @@ var
   lne: string;
   i: integer;
 begin
-  //TODO: Check for changes made to option eoSpacesToTabs
-  if not (eoTabsToSpaces in Options) then
-    exit;
-
-  lst := TStringList.Create;
-  lst.Text:=clipboard.asText;
-  try
-    for i := 0 to lst.count-1 do
-    begin
-      lne := lst[i];
-      //if eoTabsToSpaces in Options then
-      //begin
-        leadingTabsToSpaces(lne, TabWidth);
-        lst[i] := lne;
-      //end
-      {else if eoSpacesToTabs in Options then
-      begin
-        //leadingSpacesToTabs(lne, TabWidth);
-        //lst[i] := lne;
-      end}
-    end;
-    clipboard.asText := lst.strictText;
-  finally
-    lst.free;
-  end;
+  ////TODO: Check for changes made to option eoSpacesToTabs
+  //if not (eoTabsToSpaces in Options) then
+  //  exit;
+  //
+  //lst := TStringList.Create;
+  //lst.Text:=clipboard.asText;
+  //try
+  //  for i := 0 to lst.count-1 do
+  //  begin
+  //    lne := lst[i];
+  //    //if eoTabsToSpaces in Options then
+  //    //begin
+  //      leadingTabsToSpaces(lne, TabWidth);
+  //      lst[i] := lne;
+  //    //end
+  //    {else if eoSpacesToTabs in Options then
+  //    begin
+  //      //leadingSpacesToTabs(lne, TabWidth);
+  //      //lst[i] := lne;
+  //    end}
+  //  end;
+  //  clipboard.asText := lst.strictText;
+  //finally
+  //  lst.free;
+  //end;
 end;
 {$ENDREGION --------------------------------------------------------------------}
 
@@ -3077,27 +3262,28 @@ var
   line: string;
   ddc: char;
   lxd: boolean;
+  i, j: integer;
 begin
   case Key of
     VK_BACK:
     begin
       fCanDscan:=true;
       if fCallTipWin.Visible and (CaretX > 1)
-        and (LineText[LogicalCaretXY.X-1] = '(') then
+        and (lineTextAtCarret()[caretX-1] = '(') then
           decCallTipsLvl;
     end;
     VK_RETURN:
     begin
       fCanDscan:=true;
-      line := LineText;
+      line := lineTextAtCarret;
       case fAutoCloseCurlyBrace of
-        autoCloseOnNewLineAlways: if (CaretX > 1) and (line[LogicalCaretXY.X - 1] = '{') then
+        autoCloseOnNewLineAlways: if (CaretX > 1) and (line[caretX - 1] = '{') then
         begin
           Key := 0;
           curlyBraceCloseAndIndent;
         end;
-        autoCloseOnNewLineEof: if (CaretX > 1) and (line[LogicalCaretXY.X - 1] = '{') then
-        if (CaretY = Lines.Count) and (CaretX = line.length+1) then
+        autoCloseOnNewLineEof: if (CaretX > 1) and (line[caretX - 1] = '{') then
+        if (CaretY = Strings.Count) and (CaretX = line.length+1) then
         begin
           Key := 0;
           curlyBraceCloseAndIndent;
@@ -3108,12 +3294,13 @@ begin
         fSmartDdocNewline then
       begin
         lxd := false;
-        if (LogicalCaretXY.X - 1 >= line.length)
-            or isBlank(line[LogicalCaretXY.X .. line.length]) then
+        i := caretX;
+        j := line.length;
+        if (i - 1 >= j) or isBlank(line[caretX .. line.length]) then
         begin
           lxd := true;
           fLexToks.Clear;
-          lex(lines.Text, fLexToks);
+          lex(Strings.TextString_UTF8, fLexToks);
           if lexCanCloseBrace then
           begin
             Key := 0;
@@ -3126,7 +3313,7 @@ begin
           if not lxd then
           begin
             fLexToks.Clear;
-            lex(lines.Text, fLexToks);
+            lex(Strings.TextString_UTF8, fLexToks);
           end;
           ddc := lexInDdoc;
           if ddc in ['*', '+'] then
@@ -3142,9 +3329,9 @@ begin
     end;
   end;
   inherited;
-  highlightCurrentIdentifier;
-  if fCompletion.IsActive then
-    fCompletion.CurrentString:= GetWordAtRowCol(LogicalCaretXY);
+  //highlightCurrentIdentifier;
+  //if fCompletion.IsActive then
+  //  fCompletion.CurrentString:= GetWordAtRowCol(LogicalCaretXY);
   case Key of
     VK_BROWSER_BACK: fPositions.back;
     VK_BROWSER_FORWARD: fPositions.next;
@@ -3171,14 +3358,14 @@ begin
     VK_OEM_PERIOD, VK_DECIMAL: fCanAutoDot := true;
   end;
   inherited;
-  if fAutoCallCompletion and fIsDSource and (not fCompletion.IsActive) and
-    (Key < $80) and (char(Key) in ['a'..'z', 'A'..'Z']) then
-  begin
-    fCompletion.Execute(GetWordAtRowCol(LogicalCaretXY),
-      ClientToScreen(point(CaretXPix, CaretYPix + LineHeight)));
-  end;
-  if StaticEditorMacro.automatic then
-    StaticEditorMacro.Execute;
+  //if fAutoCallCompletion and fIsDSource and (not fCompletion.IsActive) and
+  //  (Key < $80) and (char(Key) in ['a'..'z', 'A'..'Z']) then
+  //begin
+  //  fCompletion.Execute(GetWordAtRowCol(LogicalCaretXY),
+  //    ClientToScreen(point(CaretXPix, CaretYPix + LineHeight)));
+  //end;
+  //if StaticEditorMacro.automatic then
+  //  StaticEditorMacro.Execute;
 end;
 
 procedure TCESynMemo.UTF8KeyPress(var Key: TUTF8Char);
@@ -3204,19 +3391,19 @@ begin
           autoCloseAlways:
             curlyBraceCloseAndIndent;
           autoCloseAtEof:
-            if (CaretY = Lines.Count) and (CaretX = LineText.length+1) then
+            if (CaretY = Strings.Count) and (CaretX = lineTextAtCarret.length+1) then
               curlyBraceCloseAndIndent;
           autoCloseLexically:
           begin
             fLexToks.Clear;
-            lex(lines.Text, fLexToks);
+            lex(Strings.TextString_UTF8, fLexToks);
             if lexCanCloseBrace then
               curlyBraceCloseAndIndent;
           end;
         end;
   end;
-  if fCompletion.IsActive then
-    fCompletion.CurrentString:=GetWordAtRowCol(LogicalCaretXY);
+  //if fCompletion.IsActive then
+  //  fCompletion.CurrentString:=GetWordAtRowCol(LogicalCaretXY);
 end;
 
 procedure TCESynMemo.MouseLeave;
@@ -3230,6 +3417,7 @@ end;
 procedure TCESynMemo.MouseMove(Shift: TShiftState; X, Y: Integer);
 var
   dx, dy: Integer;
+  dt: TATPosDetails;
 begin
   hideDDocs;
   hideCallTips;
@@ -3242,24 +3430,25 @@ begin
       ((dy < 0) and (dy > -5) or (dy > 0) and (dy < 5)) then
         fCanShowHint:=true;
   fOldMousePos := Point(X, Y);
-  fMousePos := PixelsToRowColumn(fOldMousePos);
-  if ssLeft in Shift then
-    highlightCurrentIdentifier;
+  fMousePos := ClientPosToCaretPos(fOldMousePos, dt);
 
-  if fScrollPreview then
-  begin
-    if (x > width - 40) and (x < width - 20) then
-    begin;
-      fScrollMemo.Visible:=true;
-      fScrollMemo.goToLine(trunc((lines.Count / Height) * Y));
-      fScrollMemo.left := width - 40 - fScrollMemo.Width;
-      fScrollMemo.Top:= Y - 5;
-    end
-    else
-    begin
-      fScrollMemo.Visible:=false;
-    end;
-  end;
+  //if ssLeft in Shift then
+  //  highlightCurrentIdentifier;
+  //
+  //if fScrollPreview then
+  //begin
+  //  if (x > width - 40) and (x < width - 20) then
+  //  begin;
+  //    fScrollMemo.Visible:=true;
+  //    fScrollMemo.goToLine(trunc((lines.Count / Height) * Y));
+  //    fScrollMemo.left := width - 40 - fScrollMemo.Width;
+  //    fScrollMemo.Top:= Y - 5;
+  //  end
+  //  else
+  //  begin
+  //    fScrollMemo.Visible:=false;
+  //  end;
+  //end;
 
 end;
 
@@ -3270,12 +3459,12 @@ begin
   fCanShowHint := false;
   hideCallTips;
   hideDDocs;
-  if (emAltSetsColumnMode in MouseOptions) and not (eoScrollPastEol in Options)
-    and (ssLeft in shift) and (ssAlt in Shift) then
-  begin
-    fOverrideColMode := true;
-    Options := Options + [eoScrollPastEol];
-  end;
+  //if (emAltSetsColumnMode in MouseOptions) and not (eoScrollPastEol in Options)
+  //  and (ssLeft in shift) and (ssAlt in Shift) then
+  //begin
+  //  fOverrideColMode := true;
+  //  Options := Options + [eoScrollPastEol];
+  //end;
 end;
 
 procedure TCESynMemo.MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y:Integer);
@@ -3287,8 +3476,8 @@ begin
   begin
     pt := Mouse.CursorPos;
     pt.x:= pt.x - 40;
-    CaretY := fScrollMemo.fMemo.CaretY;
-    EnsureCursorPosVisible;
+    //CaretY := fScrollMemo.fMemo.CaretY;
+    //EnsureCursorPosVisible;
     fScrollMemo.Visible:=false;
     mouse.CursorPos := pt;
     fPositions.store;
@@ -3300,11 +3489,11 @@ begin
     mbExtra2: fPositions.next;
     mbLeft:   fPositions.store;
   end;
-  if fOverrideColMode and not SelAvail then
-  begin
-    fOverrideColMode := false;
-    Options := Options - [eoScrollPastEol];
-  end;
+  //if fOverrideColMode and not SelAvail then
+  //begin
+  //  fOverrideColMode := false;
+  //  Options := Options - [eoScrollPastEol];
+  //end;
 end;
 
 function TCESynMemo.DoMouseWheel(Shift: TShiftState; WheelDelta: Integer; MousePos: TPoint): Boolean;
@@ -3321,8 +3510,8 @@ var
   i: integer;
 begin
   result := 0;
-  for i := 0 to marks.count-1 do
-    result += byte(marks[i].ImageIndex = integer(giBreakSet));
+  //for i := 0 to marks.count-1 do
+  //  result += byte(marks[i].ImageIndex = integer(giBreakSet));
 end;
 
 procedure TCESynMemo.addBreakPoint(line: integer);
@@ -3355,24 +3544,25 @@ end;
 procedure TCESynMemo.showHintEvent(Sender: TObject; HintInfo: PHintInfo);
 var
   p: TPoint;
+  d: TATPosDetails;
 begin
   //if cursor <> crDefault then
   //  exit;
   p := ScreenToClient(mouse.CursorPos);
-  if p.x > Gutter.MarksPart.Width then
+  if p.x > Gutter.Width then
     exit;
-  p := self.PixelsToRowColumn(p);
-  showWarningForLine(p.y);
+  p := self.ClientPosToCaretPos(p, d);
+  showWarningForLine(p.y + 1);
 end;
 
 procedure TCESynMemo.removeDebugTimeMarks;
 var
   i: integer;
 begin
-  IncPaintLock;
-  for i:= marks.Count-1 downto 0 do
-    Marks.Items[i].Visible := not (TGutterIcon(Marks.Items[i].ImageIndex) in debugTimeGutterIcons);
-  DecPaintLock;
+  //IncPaintLock;
+  //for i:= marks.Count-1 downto 0 do
+  //  Marks.Items[i].Visible := not (TGutterIcon(Marks.Items[i].ImageIndex) in debugTimeGutterIcons);
+  //DecPaintLock;
 end;
 
 function TCESynMemo.isGutterIconSet(line: integer; value: TGutterIcon): boolean;
@@ -3380,13 +3570,13 @@ var
   m: TSynEditMarkLine = nil;
   i: integer;
 begin
-  result := false;
-  if line <= lines.count then
-    m := marks.Line[line];
-  if m.isNotNil then
-    for i := 0 to m.count - 1 do
-      if (m[i].ImageIndex = integer(value)) then
-        exit(true);
+  //result := false;
+  //if line <= lines.count then
+  //  m := marks.Line[line];
+  //if m.isNotNil then
+  //  for i := 0 to m.count - 1 do
+  //    if (m[i].ImageIndex = integer(value)) then
+  //      exit(true);
 end;
 
 function TCESynMemo.findBreakPoint(line: integer): boolean;
@@ -3396,12 +3586,12 @@ end;
 
 procedure TCESynMemo.gutterClick(Sender: TObject; X, Y, Line: integer; mark: TSynEditMark);
 begin
-  if findBreakPoint(line) then
-    removeBreakPoint(line)
-  else
-    addBreakPoint(line);
-  CaretY := Line;
-  EnsureCursorPosVisible;
+  //if findBreakPoint(line) then
+  //  removeBreakPoint(line)
+  //else
+  //  addBreakPoint(line);
+  //CaretY := Line;
+  //EnsureCursorPosVisible;
 end;
 
 procedure TCESynMemo.addGutterIcon(line: integer; value: TGutterIcon);
@@ -3411,22 +3601,22 @@ var
   i: integer;
   s: boolean = false;
 begin
-  m := Marks.Line[line];
-  if m.isNotNil then
-    for i := 0 to m.Count-1 do
-  begin
-    s := m.Items[i].ImageIndex = longint(value);
-    m.Items[i].Visible := s;
-  end;
-  if not s then
-  begin
-    n:= TSynEditMark.Create(self);
-    n.Line := line;
-    n.ImageList := fImages;
-    n.ImageIndex := longint(value);
-    n.Visible := true;
-    Marks.Add(n);
-  end;
+  //m := Marks.Line[line];
+  //if m.isNotNil then
+  //  for i := 0 to m.Count-1 do
+  //begin
+  //  s := m.Items[i].ImageIndex = longint(value);
+  //  m.Items[i].Visible := s;
+  //end;
+  //if not s then
+  //begin
+  //  n:= TSynEditMark.Create(self);
+  //  n.Line := line;
+  //  n.ImageList := fImages;
+  //  n.ImageIndex := longint(value);
+  //  n.Visible := true;
+  //  Marks.Add(n);
+  //end;
 end;
 
 procedure TCESynMemo.removeGutterIcon(line: integer; value: TGutterIcon);
@@ -3435,18 +3625,18 @@ var
   n: TSynEditMark;
   i: integer;
 begin
-  m := Marks.Line[line];
-  if m.isNotNil then
-    for i := m.Count-1 downto 0 do
-  begin
-    n := m.Items[i];
-    if n.ImageIndex = longint(value) then
-    begin
-      m.Delete(i);
-      FreeAndNil(n);
-    end;
-  end;
-  Repaint;
+  //m := Marks.Line[line];
+  //if m.isNotNil then
+  //  for i := m.Count-1 downto 0 do
+  //begin
+  //  n := m.Items[i];
+  //  if n.ImageIndex = longint(value) then
+  //  begin
+  //    m.Delete(i);
+  //    FreeAndNil(n);
+  //  end;
+  //end;
+  //Repaint;
 end;
 
 procedure TCESynMemo.debugStart(debugger: ICEDebugger);
@@ -3456,12 +3646,12 @@ var
 begin
   fDebugger := debugger;
   fDebugger.removeBreakPoints(fileName);
-  for i := 0 to marks.count - 1 do
-  begin
-    m := marks[i];
-    if m.ImageIndex = integer(giBreakSet) then
-      fDebugger.addBreakPoint(filename, m.line, bpkBreak);
-  end;
+  //for i := 0 to marks.count - 1 do
+  //begin
+  //  m := marks[i];
+  //  if m.ImageIndex = integer(giBreakSet) then
+  //    fDebugger.addBreakPoint(filename, m.line, bpkBreak);
+  //end;
 end;
 
 procedure TCESynMemo.debugStop;
@@ -3492,18 +3682,18 @@ end;
 procedure TCESynMemo.debugBreak(const fname: string; line: integer;
   reason: TCEDebugBreakReason);
 begin
-  if fname <> fFilename then
-    exit;
-  showPage;
-  caretY := line;
-  EnsureCursorPosVisible;
-  removeDebugTimeMarks;
-  removeDscannerWarnings;
-  case reason of
-    dbBreakPoint: addGutterIcon(line, giBreakReached);
-    dbStep, dbSignal: addGutterIcon(line, giStep);
-    dbWatch: addGutterIcon(line, giWatch);
-  end;
+  //if fname <> fFilename then
+  //  exit;
+  //showPage;
+  //caretY := line;
+  //EnsureCursorPosVisible;
+  //removeDebugTimeMarks;
+  //removeDscannerWarnings;
+  //case reason of
+  //  dbBreakPoint: addGutterIcon(line, giBreakReached);
+  //  dbStep, dbSignal: addGutterIcon(line, giStep);
+  //  dbWatch: addGutterIcon(line, giWatch);
+  //end;
 end;
 {$ENDREGION --------------------------------------------------------------------}
 

@@ -565,7 +565,7 @@ begin
   if fDoc.isNil then
     exit;
   fDoc.CaretY := StrToInt(ln);
-  fDoc.SelectLine;
+  fDoc.selectLineAtCaret;
 end;
 
 procedure TCETodoListWidget.mnuAutoRefreshClick(Sender: TObject);

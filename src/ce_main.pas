@@ -9,6 +9,7 @@ uses
   StdCtrls, AnchorDocking, AnchorDockStorage, AnchorDockOptionsDlg, Controls,
   Graphics, strutils, Dialogs, Menus, ActnList, ExtCtrls, process,
   {$IFDEF WINDOWS}Windows, {$ENDIF} XMLPropStorage, SynExportHTML, fphttpclient,
+  ATSynEdit,
   fpjson, jsonparser, jsonscanner,
   ce_common, ce_ceproject, ce_synmemo, ce_writableComponent,
   ce_widget, ce_messages, ce_interfaces, ce_editor, ce_projinspect, ce_ceprojeditor,
@@ -1012,11 +1013,11 @@ begin
       hdl := getMultiDocHandler;
       if assigned(hdl) then
       mem := hdl.findDocument(dst.fProject.filename);
-      if mem.isNotNil then
-        if dst.fProject.getFormat = pfCE then
-          mem.Highlighter := LfmSyn
-        else
-          mem.Highlighter := JsSyn;
+      //if mem.isNotNil then
+      //  if dst.fProject.getFormat = pfCE then
+      //    mem.Highlighter := LfmSyn
+      //  else
+      //    mem.Highlighter := JsSyn;
     end;
 
     grp := getProjectGroup;
@@ -2441,11 +2442,11 @@ begin
       if Execute then
       begin
         filename := FileName.normalizePath;
-        exp.Highlighter := fDoc.Highlighter;
-        exp.Title := fDoc.fileName;
-        exp.ExportAsText:=true;
-        exp.ExportAll(fDoc.Lines);
-        exp.SaveToFile(filename);
+        //exp.Highlighter := fDoc.Highlighter;
+        //exp.Title := fDoc.fileName;
+        //exp.ExportAsText:=true;
+        //exp.ExportAll(fDoc.Lines);
+        //exp.SaveToFile(filename);
       end;
     finally
       Free;
@@ -2467,10 +2468,11 @@ end;
 
 procedure TCEMainForm.saveFile(document: TCESynMemo);
 begin
-  if (document.Highlighter = LfmSyn) or (document.Highlighter = JsSyn) then
-    saveProjSource(document)
-  else if document.fileName.fileExists then
-    document.save;
+  //if (document.Highlighter = LfmSyn) or (document.Highlighter = JsSyn) then
+  //  saveProjSource(document)
+  //else
+      if document.fileName.fileExists then
+          document.save;
 end;
 
 procedure TCEMainForm.mruFileItemClick(Sender: TObject);
@@ -2627,8 +2629,8 @@ begin
     begin
       str := TStringList.create;
       try
-        str.assign(fDoc.Lines);
-        str.saveToFile(FileName.normalizePath);
+        //str.assign(fDoc.Lines);
+        //str.saveToFile(FileName.normalizePath);
       finally
         str.free;
       end;
@@ -2648,60 +2650,60 @@ end;
 {$REGION edit ------------------------------------------------------------------}
 procedure TCEMainForm.actEdCopyExecute(Sender: TObject);
 begin
-  if fDoc.isNotNil then
-    fDoc.CopyToClipboard;
+  //if fDoc.isNotNil then
+  //  fDoc.CopyToClipboard;
 end;
 
 procedure TCEMainForm.actEdCutExecute(Sender: TObject);
 begin
-  if fDoc.isNotNil then
-    fDoc.CutToClipboard;
+  //if fDoc.isNotNil then
+    //fDoc.CutToClipboard;
 end;
 
 procedure TCEMainForm.actEdPasteExecute(Sender: TObject);
 begin
-  if fDoc.isNotNil then
-    fDoc.PasteFromClipboard;
+  //if fDoc.isNotNil then
+    //fDoc.PasteFromClipboard;
 end;
 
 procedure TCEMainForm.actEdUndoExecute(Sender: TObject);
 begin
-  if fDoc.isNotNil then
-    fDoc.Undo;
+  //if fDoc.isNotNil then
+    //fDoc.Undo;
 end;
 
 procedure TCEMainForm.actEdRedoExecute(Sender: TObject);
 begin
-  if fDoc.isNotNil then
-    fDoc.Redo;
+  //if fDoc.isNotNil then
+    //fDoc.Redo;
 end;
 
 procedure TCEMainForm.actEdMacPlayExecute(Sender: TObject);
 begin
-  if fDoc.isNotNil then
-    fEditWidg.macRecorder.PlaybackMacro(fDoc);
+  //if fDoc.isNotNil then
+    //fEditWidg.macRecorder.PlaybackMacro(fDoc);
 end;
 
 procedure TCEMainForm.actEdMacStartStopExecute(Sender: TObject);
 begin
   if fDoc.isNotNil then
   begin
-    if fEditWidg.macRecorder.State = msRecording then
-      fEditWidg.macRecorder.Stop
-    else fEditWidg.macRecorder.RecordMacro(fDoc);
+    //if fEditWidg.macRecorder.State = msRecording then
+      //fEditWidg.macRecorder.Stop
+    //else fEditWidg.macRecorder.RecordMacro(fDoc);
   end;
 end;
 
 procedure TCEMainForm.actEdIndentExecute(Sender: TObject);
 begin
-  if fDoc.isNotNil then
-    fDoc.ExecuteCommand(ecBlockIndent, '', nil);
+  //if fDoc.isNotNil then
+    //fDoc.ExecuteCommand(ecBlockIndent, '', nil);
 end;
 
 procedure TCEMainForm.actEdUnIndentExecute(Sender: TObject);
 begin
-  if fDoc.isNotNil then
-    fDoc.ExecuteCommand(ecBlockUnIndent, '', nil);
+  //if fDoc.isNotNil then
+    //fDoc.ExecuteCommand(ecBlockUnIndent, '', nil);
 end;
 
 procedure TCEMainForm.actEdFindExecute(Sender: TObject);
@@ -2712,10 +2714,11 @@ begin
       exit;
   fFindWidg.showWidget;
 
-  if fDoc.SelAvail then
-    str := fDoc.SelText
+  if fDoc.hasSelection then
+    str := fDoc.TextSelected
   else
-    str := fDoc.Identifier;
+    str := fDoc.TextCurrentWord;
+
   ffindwidg.cbToFind.Text := str;
   ffindwidg.cbToFindChange(nil);
   ffindwidg.cbToFind.SetFocus;
@@ -2851,10 +2854,10 @@ begin
   result := false;
   fMsgs.clearByData(fDoc);
   FreeRunnableProc;
-  if fDoc.isNil or (fDoc.Lines.Count = 0) then
+  if fDoc.isNil or (fDoc.Strings.Count = 0) then
     exit;
 
-  firstlineFlags := fDoc.Lines[0];
+  firstlineFlags := fDoc.Strings.LinesUTF8[0];
   rng.init(firstLineFlags);
   if rng.startsWith('#!') then
   begin
@@ -2947,9 +2950,9 @@ begin
     end
     else dmdproc.Parameters.Add('-version=runnable_module');
 
-    if fRunnablesOptions.detectLibraries then
-      LibMan.getLibsForSource(fDoc.Lines, dmdproc.Parameters, dmdproc.Parameters)
-    else
+    //if fRunnablesOptions.detectLibraries then
+    //  LibMan.getLibsForSource(fDoc.Strings, dmdproc.Parameters, dmdproc.Parameters)
+    //else
     begin
       srt := TStringList.Create;
       try
@@ -3196,7 +3199,7 @@ procedure TCEMainForm.actFileNewClipExecute(Sender: TObject);
 begin
   newFile;
   fDoc.setFocus;
-  fDoc.PasteFromClipboard;
+  //fDoc.PasteFromClipboard;
 end;
 
 procedure TCEMainForm.actFileNewDubScriptExecute(Sender: TObject);
@@ -3778,10 +3781,10 @@ begin
 
   openFile(fProject.filename);
   fDoc.isProjectDescription := true;
-  if fProject.getFormat = pfCE then
-    fDoc.Highlighter := LfmSyn
-  else
-    fDoc.Highlighter := JsSyn;
+  //if fProject.getFormat = pfCE then
+  //  fDoc.Highlighter := LfmSyn
+  //else
+  //  fDoc.Highlighter := JsSyn;
 end;
 
 procedure TCEMainForm.actProjOptViewExecute(Sender: TObject);

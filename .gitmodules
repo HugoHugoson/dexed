@@ -7,3 +7,6 @@
 [submodule "etc/stdx-allocator"]
 	path = etc/stdx-allocator
 	url = https://github.com/dlang-community/stdx-allocator.git
+[submodule "etc/ATSynEdit"]
+	path = etc/ATSynEdit
+	url = https://github.com/Alexey-T/ATSynEdit.git

@@ -697,24 +697,24 @@ begin
   anEditor.completionMenu.CaseSensitive   := fCompletionMenuCaseCare;
   TStringList(anEditor.completionMenu.ItemList).CaseSensitive := fCompletionMenuCaseCare;
 
-  anEditor.Gutter.LineNumberPart.ShowOnlyLineNumbersMultiplesOf:=fLineNumEvery;
+  //anEditor.Gutter.LineNumberPart.ShowOnlyLineNumbersMultiplesOf:=fLineNumEvery;
 
-  anEditor.SelectedColor.Assign(fSelAttribs);
-  anEditor.FoldedCodeColor.Assign(fFoldedColor);
-  anEditor.MouseLinkColor.Assign(fMouseLinkAttribs);
-  anEditor.BracketMatchColor.Assign(fBracketMatchAttribs);
-  anEditor.HighlightAllColor.Assign(fIdentifierMarkup);
-  anEditor.LineHighlightColor.Assign(fCurrLineAttribs);
-  anEditor.TabWidth := tabulationWidth;
-  anEditor.BlockIndent := blockIndentation;
-  anEditor.ExtraLineSpacing := lineSpacing;
-  anEditor.ExtraCharSpacing := characterSpacing;
-  anEditor.Options := options1;
-  anEditor.Options2 := options2;
-  anEditor.MouseOptions := mouseOptions;
-  anEditor.Color := background;
-  anEditor.RightEdge := rightEdge;
-  anEditor.RightEdgeColor := rightEdgeColor;
+  //anEditor.SelectedColor.Assign(fSelAttribs);
+  //anEditor.FoldedCodeColor.Assign(fFoldedColor);
+  //anEditor.MouseLinkColor.Assign(fMouseLinkAttribs);
+  //anEditor.BracketMatchColor.Assign(fBracketMatchAttribs);
+  //anEditor.HighlightAllColor.Assign(fIdentifierMarkup);
+  //anEditor.LineHighlightColor.Assign(fCurrLineAttribs);
+  //anEditor.TabWidth := tabulationWidth;
+  //anEditor.BlockIndent := blockIndentation;
+  //anEditor.ExtraLineSpacing := lineSpacing;
+  //anEditor.ExtraCharSpacing := characterSpacing;
+  //anEditor.Options := options1;
+  //anEditor.Options2 := options2;
+  //anEditor.MouseOptions := mouseOptions;
+  //anEditor.Color := background;
+  //anEditor.RightEdge := rightEdge;
+  //anEditor.RightEdgeColor := rightEdgeColor;
   anEditor.IdentifierMatchOptions:= identifierMatchOptions;
   anEditor.detectIndentMode := detectIndentMode;
   anEditor.phobosDocRoot:=fPhobosDocRoot;
@@ -737,31 +737,31 @@ begin
     include(cs, c);
   anEditor.closeCompletionChars:=cs;
 
-  for i := 0 to anEditor.Keystrokes.Count-1 do
-  begin
-    kst := anEditor.Keystrokes.Items[i];
-    for j := 0 to fShortCuts.Count-1 do
-    begin
-      dup := false;
-      shc := TCEPersistentShortcut(fShortCuts.Items[j]);
-      if shc.actionName = EditorCommandToCodeString(kst.Command) then
-      begin
-        try
-          for k := 0 to i-1 do
-            if anEditor.Keystrokes.Items[k].shortCut = shc.shortcut then
-              if shc.shortCut <> 0 then
-                dup := true;
-          if not dup then
-            kst.shortCut := shc.shortcut;
-        except
-          kst.shortCut := 0;
-          shc.shortcut := 0;
-          // in case of conflict synedit raises an exception.
-        end;
-        break;
-      end;
-    end;
-  end;
+  //for i := 0 to anEditor.Keystrokes.Count-1 do
+  //begin
+  //  kst := anEditor.Keystrokes.Items[i];
+  //  for j := 0 to fShortCuts.Count-1 do
+  //  begin
+  //    dup := false;
+  //    shc := TCEPersistentShortcut(fShortCuts.Items[j]);
+  //    if shc.actionName = EditorCommandToCodeString(kst.Command) then
+  //    begin
+  //      try
+  //        for k := 0 to i-1 do
+  //          if anEditor.Keystrokes.Items[k].shortCut = shc.shortcut then
+  //            if shc.shortCut <> 0 then
+  //              dup := true;
+  //        if not dup then
+  //          kst.shortCut := shc.shortcut;
+  //      except
+  //        kst.shortCut := 0;
+  //        shc.shortcut := 0;
+  //        // in case of conflict synedit raises an exception.
+  //      end;
+  //      break;
+  //    end;
+  //  end;
+  //end;
 end;
 {$ENDREGION}
 

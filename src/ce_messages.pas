@@ -1017,7 +1017,6 @@ begin
   if fDoc.isNil then
     exit;
   fDoc.CaretXY := pos;
-  fDoc.SelectLine;
 end;
 
 function TCEMessagesWidget.itemShouldBeVisible(item: TTreeNode;

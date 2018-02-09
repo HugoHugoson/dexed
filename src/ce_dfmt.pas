@@ -310,50 +310,50 @@ begin
   if not exeInSysPath('dfmt') then
     exit;
 
-  fBackup.Assign(fDoc.Lines);
-  prc := TProcess.create(nil);
-  try
-    prc.Executable:= exeFullName('dfmt' + exeExt);
-    prc.Options:= prc.Options + [poUsePipes, poStderrToOutPut];
-
-    setLength(inp, 20);
-    prc.Parameters.Add('--version');
-    prc.Execute;
-    i := prc.Output.Read(inp[1], 20);
-    if (i > 4) and (inp[2] = '.') then
-    begin
-      majv := Byte(inp[1]) - Byte('0');
-      minv := Byte(inp[3]) - Byte('0');
-    end;
-    while prc.Running do
-      sleep(1);
-
-    prc.Parameters.Clear;
-    fDmtWrapper.getParameters(prc.Parameters, majv, minv);
-    prc.Execute;
-    inp := fDoc.Lines.Text;
-    prc.Input.Write(inp[1], inp.length);
-    prc.CloseInput;
-    try
-      str := TStringList.Create;
-      processOutputToStrings(prc,str);
-      fDoc.replaceUndoableContent(str.strictText);
-    except
-      fDoc.Lines.Assign(fBackup);
-    end;
-    while prc.Running do
-      sleep(1);
-  finally
-    prc.free;
-    str.free;
-  end;
+  //fBackup.Assign(fDoc.Lines);
+  //prc := TProcess.create(nil);
+  //try
+  //  prc.Executable:= exeFullName('dfmt' + exeExt);
+  //  prc.Options:= prc.Options + [poUsePipes, poStderrToOutPut];
+  //
+  //  setLength(inp, 20);
+  //  prc.Parameters.Add('--version');
+  //  prc.Execute;
+  //  i := prc.Output.Read(inp[1], 20);
+  //  if (i > 4) and (inp[2] = '.') then
+  //  begin
+  //    majv := Byte(inp[1]) - Byte('0');
+  //    minv := Byte(inp[3]) - Byte('0');
+  //  end;
+  //  while prc.Running do
+  //    sleep(1);
+  //
+  //  prc.Parameters.Clear;
+  //  fDmtWrapper.getParameters(prc.Parameters, majv, minv);
+  //  prc.Execute;
+  //  inp := fDoc.Lines.Text;
+  //  prc.Input.Write(inp[1], inp.length);
+  //  prc.CloseInput;
+  //  try
+  //    str := TStringList.Create;
+  //    processOutputToStrings(prc,str);
+  //    fDoc.replaceUndoableContent(str.strictText);
+  //  except
+  //    fDoc.Lines.Assign(fBackup);
+  //  end;
+  //  while prc.Running do
+  //    sleep(1);
+  //finally
+  //  prc.free;
+  //  str.free;
+  //end;
 end;
 
 procedure TCEDfmtWidget.doCancel(sender: TObject);
 begin
-  if fDoc.isNil then
-    exit;
-  fDoc.Lines.Assign(fBackup);
+  //if fDoc.isNil then
+  //  exit;
+  //fDoc.Lines.Assign(fBackup);
 end;
 {$ENDREGION}
 

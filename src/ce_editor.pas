@@ -469,8 +469,8 @@ begin
   document.OnKeyPress := @memoKeyPress;
   document.OnMouseDown := @memoMouseDown;
   document.OnMouseMove := @memoMouseMove;
-  document.OnClickLink := @memoCtrlClick;
-  document.OnCommandProcessed:= @memoCmdProcessed;
+  //document.OnClickLink := @memoCtrlClick;
+  //document.OnCommandProcessed:= @memoCmdProcessed;
   //
   fDoc := document;
   fDoc.setFocus;
@@ -580,13 +580,13 @@ begin
   end;
   doc := TCESynMemo.Create(nil);
   fDoc.loadFromFile(TrimFilename(fname));
-  if assigned(fProj) and (fProj.filename = fDoc.fileName) then
-  begin
-    if fProj.getFormat = pfCE then
-      fDoc.Highlighter := LfmSyn
-    else
-      fDoc.Highlighter := JsSyn;
-  end;
+  //if assigned(fProj) and (fProj.filename = fDoc.fileName) then
+  //begin
+  //  if fProj.getFormat = pfCE then
+  //    fDoc.Highlighter := LfmSyn
+  //  else
+  //    fDoc.Highlighter := JsSyn;
+  //end;
 end;
 
 function TCEEditorWidget.closeDocument(index: Integer; promptOnChanged: boolean = true): boolean;
@@ -645,7 +645,7 @@ procedure TCEEditorWidget.focusedEditorChanged;
 begin
   if fDoc.isNil then exit;
   //
-  macRecorder.Editor:= fDoc;
+  //macRecorder.Editor:= fDoc;
   fDoc.PopupMenu := mnuEditor;
   fDoc.hideCallTips;
   fDoc.hideDDocs;
@@ -723,17 +723,17 @@ begin
       getSymbolLoc;
     ecRecordMacro:
     begin
-      if macRecorder.State = msStopped then
-        macRecorder.RecordMacro(fDoc)
-      else
-        macRecorder.Stop;
-      updateImperative;
+      //if macRecorder.State = msStopped then
+      //  macRecorder.RecordMacro(fDoc)
+      //else
+      //  macRecorder.Stop;
+      //updateImperative;
     end;
     ecPlayMacro:
     begin
-      macRecorder.Stop;
-      macRecorder.PlaybackMacro(fDoc);
-      updateImperative;
+      //macRecorder.Stop;
+      //macRecorder.PlaybackMacro(fDoc);
+      //updateImperative;
     end;
   end;
 end;
@@ -785,19 +785,19 @@ begin
   begin
     sum := 0;
     len := getLineEndingLength(fDoc.fileName);
-    for i := 0 to fDoc.Lines.Count-1 do
+    //for i := 0 to fDoc.Lines.Count-1 do
     begin
-      linelen := fDoc.Lines[i].length;
-      if sum + linelen + len > srcpos then
-      begin
-        fDoc.CaretY := i + 1;
-        fDoc.CaretX := srcpos - sum + len;
-        fDoc.SelectWord;
-        fDoc.EnsureCursorPosVisible;
-        break;
-      end;
-      sum += linelen;
-      sum += len;
+      //linelen := fDoc.Lines[i].length;
+      //if sum + linelen + len > srcpos then
+      //begin
+      //  fDoc.CaretY := i + 1;
+      //  fDoc.CaretX := srcpos - sum + len;
+      //  fDoc.SelectWord;
+      //  fDoc.EnsureCursorPosVisible;
+      //  break;
+      //end;
+      //sum += linelen;
+      //sum += len;
     end;
   end;
 end;
@@ -815,7 +815,8 @@ begin
     editorStatus.Panels[4].Text := '';
   end else
   begin
-    editorStatus.Panels[0].Text := format('%d : %d | %d', [fDoc.CaretY, fDoc.CaretX, fDoc.SelEnd - fDoc.SelStart]);
+    editorStatus.Panels[0].Text := format('%d : %d | %d',
+      [fDoc.caretY, fDoc.caretX, length(fDoc.TextSelected)]);
     editorStatus.Panels[1].Text := modstr[fDoc.modified];
     if macRecorder.State = msRecording then
       editorStatus.Panels[2].Text := 'recording macro'
@@ -823,9 +824,9 @@ begin
       editorStatus.Panels[2].Text := 'no macro'
     else
       editorStatus.Panels[2].Text := 'macro ready';
-    if fDoc.ReadOnly then
+    if fDoc.ModeReadOnly then
     begin
-      editorStatus.Panels[3].Width:= 120;
+      editorStatus.Panels[3].Width:= scaleX(120, 96);
       editorStatus.Panels[3].Text := '(read-only)';
     end else
       editorStatus.Panels[3].Width:= 0;
@@ -889,7 +890,7 @@ end;
 procedure TCEEditorWidget.mnuedCopyClick(Sender: TObject);
 begin
   if fDoc.isNotNil then
-    fDoc.ExecuteCommand(ecCopy, '', nil);
+    fDoc.DoCommand(cCommand_ClipboardCopy);
 end;
 
 procedure TCEEditorWidget.mnuedCallTipClick(Sender: TObject);
@@ -906,19 +907,19 @@ end;
 procedure TCEEditorWidget.mnuedCommClick(Sender: TObject);
 begin
   if fDoc.isNotNil then
-    fDoc.CommandProcessor(ecCommentSelection, '', nil);
+    fDoc.DoCommand(ecCommentSelection);
 end;
 
 procedure TCEEditorWidget.mnuedPrevClick(Sender: TObject);
 begin
   if fDoc.isNotNil then
-    fDoc.CommandProcessor(ecPreviousLocation, '', nil);
+    fDoc.DoCommand(ecPreviousLocation);
 end;
 
 procedure TCEEditorWidget.mnuedNextClick(Sender: TObject);
 begin
   if fDoc.isNotNil then
-    fDoc.CommandProcessor(ecNextLocation, '', nil);
+    fDoc.DoCommand(ecNextLocation);
 end;
 
 procedure TCEEditorWidget.mnuedInvAllNoneClick(Sender: TObject);
@@ -927,7 +928,7 @@ begin
     exit;
   if not fDoc.IsDSource and not fDoc.alwaysAdvancedFeatures then
     exit;
-  fDoc.CommandProcessor(ecSwapVersionAllNone, '', nil);
+  fDoc.DoCommand(ecSwapVersionAllNone);
 end;
 
 procedure TCEEditorWidget.MenuItem5Click(Sender: TObject);
@@ -953,13 +954,13 @@ end;
 procedure TCEEditorWidget.mnuedUpcaseClick(Sender: TObject);
 begin
   if fDoc.isNotNil then
-    fDoc.CommandProcessor(ecUpperCaseWordOrSel, #0, nil);
+    fDoc.DoCommand(ecUpperCaseWordOrSel);
 end;
 
 procedure TCEEditorWidget.mnuedLowcaseClick(Sender: TObject);
 begin
   if fDoc.isNotNil then
-    fDoc.CommandProcessor(ecLowerCaseWordOrSel, #0, nil);
+    fDoc.DoCommand(ecLowerCaseWordOrSel);
 end;
 
 procedure TCEEditorWidget.mnuedPrevWarnClick(Sender: TObject);
@@ -971,7 +972,7 @@ end;
 procedure TCEEditorWidget.mnuedSortLinesClick(Sender: TObject);
 begin
   if fDoc.isNotNil then
-    fDoc.CommandProcessor(ecSortLines, #0, nil);
+    fDoc.DoCommand(ecSortLines);
 end;
 
 procedure TCEEditorWidget.mnuedNextCareaClick(Sender: TObject);
@@ -1044,19 +1045,19 @@ end;
 procedure TCEEditorWidget.MenuItem6Click(Sender: TObject);
 begin
   if fDoc.isNotNil then
-    fDoc.CommandProcessor(ecCommentIdentifier, '', nil);
+    fDoc.DoCommand(ecCommentIdentifier);
 end;
 
 procedure TCEEditorWidget.mnuedRenameClick(Sender: TObject);
 begin
   if fDoc.isNotNil then
-    fDoc.CommandProcessor(ecRenameIdentifier, '', nil);
+    fDoc.DoCommand(ecRenameIdentifier);
 end;
 
 procedure TCEEditorWidget.mnuedCutClick(Sender: TObject);
 begin
   if fDoc.isNotNil then
-    fDoc.ExecuteCommand(ecCut, '', nil);
+    fDoc.DoCommand(cCommand_ClipboardCut);
 end;
 
 procedure TCEEditorWidget.mnuedDdocClick(Sender: TObject);
@@ -1072,19 +1073,19 @@ end;
 procedure TCEEditorWidget.mnuedPasteClick(Sender: TObject);
 begin
   if fDoc.isNotNil then
-    fDoc.ExecuteCommand(ecPaste, '', nil);
+    fDoc.DoCommand(cCommand_ClipboardPaste);
 end;
 
 procedure TCEEditorWidget.mnuedUndoClick(Sender: TObject);
 begin
   if fDoc.isNotNil then
-    fDoc.ExecuteCommand(ecUndo, '', nil);
+    fDoc.DoCommand(cCommand_Undo);
 end;
 
 procedure TCEEditorWidget.mnuedRedoClick(Sender: TObject);
 begin
   if fDoc.isNotNil then
-    fDoc.ExecuteCommand(ecRedo, '', nil);
+    fDoc.DoCommand(cCommand_Redo);
 end;
 
 procedure TCEEditorWidget.mnuedJum2DeclClick(Sender: TObject);
@@ -1097,12 +1098,12 @@ procedure TCEEditorWidget.mnuEditorPopup(Sender: TObject);
 begin
   if fDoc.isNil then exit;
   //
-  mnuedCut.Enabled:=fDoc.SelAvail;
-  mnuedPaste.Enabled:=fDoc.CanPaste;
-  mnuedCopy.Enabled:=fDoc.SelAvail;
-  mnuedUndo.Enabled:=fDoc.CanUndo;
-  mnuedRedo.Enabled:=fDoc.CanRedo;
-  mnuedJum2Decl.Enabled:=fDoc.isDSource;
+  mnuedCut.Enabled:=fDoc.hasSelection;
+  //mnuedPaste.Enabled:=fDoc.CanPaste;
+  mnuedCopy.Enabled:=fDoc.hasSelection;
+  //mnuedUndo.Enabled:=fDoc.CanUndo;
+  //mnuedRedo.Enabled:=fDoc.CanRedo;
+  //mnuedJum2Decl.Enabled:=fDoc.isDSource;
 end;
 {$ENDREGION}
 end.

@@ -713,7 +713,7 @@ begin
   line := NativeUInt(Tree.Selected.Data);
   {$POP}
   fDoc.CaretY := line;
-  fDoc.SelectLine;
+  fDoc.selectLineAtCaret;
 end;
 
 procedure TCESymbolListWidget.checkIfHasToolExe;
@@ -728,7 +728,7 @@ var
 begin
   if not fHasToolExe then exit;
   if fDoc.isNil then exit;
-  if (fDoc.Lines.Count = 0) or not fDoc.isDSource then
+  if (fDoc.Strings.Count = 0) or not fDoc.isDSource then
   begin
     clearTree;
     updateVisibleCat;
@@ -908,7 +908,7 @@ var
 begin
   if fDoc.isNil then exit;
   //
-  target := fDoc.CaretY;
+  target := fDoc.caretY;
   for i := 0 to tree.Items.Count-1 do
     look(tree.Items[i]);
   if toExpand.isNotNil then

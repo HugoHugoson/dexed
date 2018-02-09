@@ -194,10 +194,10 @@ begin
     fSymbols[CFF] := fDoc.fileName;
     fSymbols[CFR] := fSymbols[CFF].stripFileExt + exeExt;
     fSymbols[CFP] := fSymbols[CFF].extractFilePath;
-    if fDoc.Identifier.isNotEmpty then
-      fSymbols[CI] := fDoc.Identifier;
-    fSymbols[CL] := fDoc.LineText;
-    fSymbols[CS] := fDoc.SelText;
+    if fDoc.TextCurrentWord <> '' then
+      fSymbols[CI] := fDoc.TextCurrentWord;
+    fSymbols[CL] := fDoc.lineTextAtCarret();
+    fSymbols[CS] := fDoc.selTextUTF8;
   end;
   // project interface
   if hasProjItf then

@@ -341,21 +341,21 @@ begin
   fSearchMru.Insert(0,fToFind);
   cbToFind.Items.Assign(fSearchMru);
   //
-  if fAllInProj then
-  begin
-    lst := TSynEditStringList.Create;
-    try
-      for i := 0 to fProj.sourcesCount-1 do
-      begin
-        fnm := fProj.sourceAbsolute(i);
-        lst.LoadFromFile(fnm);
-        findAll(fnm, lst);
-      end;
-    finally
-      lst.Free;
-    end;
-  end
-  else findAll(fDoc.fileName, fDoc.Lines);
+  //if fAllInProj then
+  //begin
+  //  lst := TSynEditStringList.Create;
+  //  try
+  //    for i := 0 to fProj.sourcesCount-1 do
+  //    begin
+  //      fnm := fProj.sourceAbsolute(i);
+  //      lst.LoadFromFile(fnm);
+  //      findAll(fnm, lst);
+  //    end;
+  //  finally
+  //    lst.Free;
+  //  end;
+  //end
+  //else findAll(fDoc.fileName, fDoc.Lines);
 end;
 
 procedure TCESearchWidget.findAll(const filename: string; lines: TStrings);
@@ -408,33 +408,33 @@ begin
   fSearchMru.Insert(0, fToFind);
   cbToFind.Items.Assign(fSearchMru);
   //
-  if not chkFromCur.Checked then
-  begin
-    if chkBack.Checked then
-      fDoc.CaretXY := Point(high(Integer), high(Integer))
-    else
-    begin
-      if not fHasRestarted then
-        fDoc.CaretXY := Point(1,1);
-      fHasRestarted := true;
-    end;
-  end
-  else if fHasSearched then
-  begin
-    if chkBack.Checked then
-      fDoc.CaretX := fDoc.CaretX - 1
-    else
-      fDoc.CaretX := fDoc.CaretX + 1;
-  end;
-  if fDoc.SearchReplace(fToFind, '', getOptions) = 0 then
-    dlgOkInfo('the expression cannot be found')
-  else
-  begin
-    fHasSearched := true;
-    fHasRestarted := false;
-    chkFromCur.Checked := true;
-  end;
-  updateImperative;
+  //if not chkFromCur.Checked then
+  //begin
+  //  if chkBack.Checked then
+  //    fDoc.CaretXY := Point(high(Integer), high(Integer))
+  //  else
+  //  begin
+  //    if not fHasRestarted then
+  //      fDoc.CaretXY := Point(1,1);
+  //    fHasRestarted := true;
+  //  end;
+  //end
+  //else if fHasSearched then
+  //begin
+  //  if chkBack.Checked then
+  //    fDoc.CaretX := fDoc.CaretX - 1
+  //  else
+  //    fDoc.CaretX := fDoc.CaretX + 1;
+  //end;
+  //if fDoc.SearchReplace(fToFind, '', getOptions) = 0 then
+  //  dlgOkInfo('the expression cannot be found')
+  //else
+  //begin
+  //  fHasSearched := true;
+  //  fHasRestarted := false;
+  //  chkFromCur.Checked := true;
+  //end;
+  //updateImperative;
 end;
 
 procedure TCESearchWidget.actReplaceNextExecute(sender: TObject);
@@ -446,26 +446,26 @@ begin
   cbToFind.Items.Assign(fSearchMru);
   cbReplaceWth.Items.Assign(fReplaceMru);
   //
-  if chkPrompt.Checked then
-    fDoc.OnReplaceText := @replaceEvent;
-  if not chkFromCur.Checked then
-  begin
-    if chkBack.Checked then
-      fDoc.CaretXY := Point(high(Integer), high(Integer))
-    else
-      fDoc.CaretXY := Point(0,0);
-  end
-  else if fHasSearched then
-  begin
-    if chkBack.Checked then
-      fDoc.CaretX := fDoc.CaretX - 1
-    else
-      fDoc.CaretX := fDoc.CaretX + fToFind.length;
-  end;
-  if fDoc.SearchReplace(fToFind, fReplaceWth, getOptions + [ssoReplace]) <> 0 then
-    fHasSearched := true;
-  fDoc.OnReplaceText := nil;
-  updateImperative;
+  //if chkPrompt.Checked then
+  //  fDoc.OnReplaceText := @replaceEvent;
+  //if not chkFromCur.Checked then
+  //begin
+  //  if chkBack.Checked then
+  //    fDoc.CaretXY := Point(high(Integer), high(Integer))
+  //  else
+  //    fDoc.CaretXY := Point(0,0);
+  //end
+  //else if fHasSearched then
+  //begin
+  //  if chkBack.Checked then
+  //    fDoc.CaretX := fDoc.CaretX - 1
+  //  else
+  //    fDoc.CaretX := fDoc.CaretX + fToFind.length;
+  //end;
+  //if fDoc.SearchReplace(fToFind, fReplaceWth, getOptions + [ssoReplace]) <> 0 then
+  //  fHasSearched := true;
+  //fDoc.OnReplaceText := nil;
+  //updateImperative;
 end;
 
 procedure TCESearchWidget.actReplaceAllExecute(sender: TObject);
@@ -477,22 +477,22 @@ begin
   opts := getOptions + [ssoReplace];
   opts -= [ssoBackwards];
   //
-  fSearchMru.Insert(0, fToFind);
-  fReplaceMru.Insert(0, fReplaceWth);
-  if chkPrompt.Checked then fDoc.OnReplaceText := @replaceEvent;
-  fDoc.CaretXY := Point(0,0);
-  while(true) do
-  begin
-    if fDoc.SearchReplace(fToFind, fReplaceWth, opts) = 0
-      then break;
-    if fCancelAll then
-    begin
-      fCancelAll := false;
-      break;
-    end;
-  end;
-  fDoc.OnReplaceText := nil;
-  updateImperative;
+  //fSearchMru.Insert(0, fToFind);
+  //fReplaceMru.Insert(0, fReplaceWth);
+  //if chkPrompt.Checked then fDoc.OnReplaceText := @replaceEvent;
+  //fDoc.CaretXY := Point(0,0);
+  //while(true) do
+  //begin
+  //  if fDoc.SearchReplace(fToFind, fReplaceWth, opts) = 0
+  //    then break;
+  //  if fCancelAll then
+  //  begin
+  //    fCancelAll := false;
+  //    break;
+  //  end;
+  //end;
+  //fDoc.OnReplaceText := nil;
+  //updateImperative;
 end;
 {$ENDREGION}
 

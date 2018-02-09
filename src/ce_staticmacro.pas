@@ -256,14 +256,14 @@ end;
 procedure TCEStaticEditorMacro.docNew(document: TCESynMemo);
 begin
   fDoc := document;
-  fCompletor.Editor := fDoc;
+  //fCompletor.Editor := fDoc;
 end;
 
 procedure TCEStaticEditorMacro.docFocused(document: TCESynMemo);
 begin
   if fDoc = document then exit;
   fDoc := document;
-  fCompletor.Editor := fDoc;
+  //fCompletor.Editor := fDoc;
 end;
 
 procedure TCEStaticEditorMacro.docChanged(document: TCESynMemo);
@@ -386,8 +386,8 @@ end;
 
 procedure TCEStaticEditorMacro.Execute;
 begin
-  if fDoc.isNotNil then
-    fCompletor.Execute(fDoc.Identifier, fDoc);
+  //if fDoc.isNotNil then
+  //  fCompletor.Execute(fDoc.Identifier, fDoc);
 end;
 
 procedure TCEStaticEditorMacro.Execute(aEditor: TCustomSynEdit; const aToken: string);
