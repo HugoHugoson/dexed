@@ -8,6 +8,7 @@ uses
   Classes, SysUtils, FileUtil, Forms, Controls, lcltype, Graphics, SynEditKeyCmds,
   ComCtrls, SynEditHighlighter, ExtCtrls, Menus, SynMacroRecorder, dialogs, LazFileUtils,
   SynPluginSyncroEdit, SynEdit, SynHighlighterMulti, ce_dialogs,
+  ATSynEdit_Commands,
   ce_widget, ce_interfaces, ce_synmemo, ce_dlang, ce_common, ce_dcd, ce_observer,
   ce_sharedres, ce_controls, ce_writableComponent, ce_dsgncontrols;
 

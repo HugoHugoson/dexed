@@ -280,6 +280,7 @@ type
     function getCaretX: integer;
     function getCaretY: integer;
     function getCaretXY: TPoint;
+    function getNormalizedSelRect: TRect;
     procedure setCaretX(value: integer);
     procedure setCaretY(value: integer);
     procedure setCaretXY(value: TPoint);
@@ -370,6 +371,7 @@ type
     property isTemporary: boolean read getIfTemp;
     //property TextView;
     //
+    property normalizedSelRect: TRect read getNormalizedSelRect;
     property caretX: integer read getCaretX write setCaretX;
     property caretY: integer read getCaretY write setCaretY;
     property caretXY: TPoint read getCaretXY write setCaretXY;
@@ -818,7 +820,7 @@ begin
     value := 1;
   fMemo.CaretY := value;
   fMemo.CaretX := 1;
-  //fMemo.selectLineAtCaret();
+  fMemo.SelectLine();
 end;
 {$ENDREGION}
 
@@ -1131,6 +1133,51 @@ end;
 function TCESynMemo.getCaretXY: TPoint;
 begin
   result := point(getCaretX, getCaretY);
+end;
+
+function TCESynMemo.getNormalizedSelRect: TRect;
+var
+  c: TATCaretItem;
+  r: TValueRelationship;
+begin
+  result := Rect(0,0,0,0);
+  if Carets.Count = 0 then
+    exit;
+  c:= Carets[0];
+  if c.EndX = -1 then
+    exit;
+  r := CompareValue(c.EndY, c.PosY);
+  case r of
+  -1:
+    begin
+      result.Left:= c.EndX + 1;
+      result.top := c.EndY + 1;
+      result.Right:= c.PosX + 1;
+      result.Bottom := c.PosY + 1;
+    end;
+  0:
+    begin
+      if c.EndX > c.PosX then
+      begin
+        result.Left:= c.PosX + 1;
+        result.Right:= c.EndX + 1;
+      end
+      else
+      begin
+        result.Left:= c.EndX + 1;
+        result.Right:= c.PosX + 1;
+      end;
+      result.top := c.EndY + 1;
+      result.Bottom := c.PosY + 1;
+    end;
+  1:
+    begin
+      result.Left:= c.PosX + 1;
+      result.top := c.PosY + 1;
+      result.Right:= c.EndX + 1;
+      result.Bottom := c.EndY + 1;
+    end;
+  end;
 end;
 
 procedure TCESynMemo.setCaretX(value: integer);
@@ -1595,26 +1642,24 @@ procedure TCESynMemo.commentSelection;
   end;
   procedure unCommentHere;
   begin
-    DoCommand(cCommand_GotoLineAbsBegin);
     DoCommand(cCommand_KeyDelete);
     DoCommand(cCommand_KeyDelete);
-    //ExecuteCommand(ecLineTextStart, '', nil);
-    //ExecuteCommand(ecDeleteChar, '', nil);
-    //ExecuteCommand(ecDeleteChar, '', nil);
   end;
 var
-  i, j, dx, lx, numUndo: integer;
+  i, j, dx, lx, numUndo ,e: integer;
   line: string;
   mustUndo: boolean = false;
   pt, cp: TPoint;
+  rc: TRect;
 begin
   if not hasSelection then
   begin
     i := CaretX;
     line := TrimLeft(lineTextAtCarret);
+    dx := lineTextAtCarret.length - line.length;
     mustUndo := (line.length > 1) and (line[1..2] = '//');
     strings.BeginUndoGroup;
-    DoCommand(cCommand_GotoLineAbsBegin);
+    CaretX := dx + 1;
     if not mustUndo then
     begin
       commentHere;
@@ -1629,30 +1674,29 @@ begin
   end else
   begin
     mustUndo := false;
+    rc := normalizedSelRect;
     pt.X:= high(pt.X);
     cp := CaretXY;
     numUndo := 0;
-    for i := caretY-1 to Carets[0].EndY-1 do
+    for i := rc.top-1 to rc.bottom-1 do
     begin
       line := TrimLeft(strings.LinesUTF8[i]);
-      dx := strings.LinesUTF8[i].length - line.length;
-      lx := 0;
-      for j := 1 to dx do
-        if strings.LinesUTF8[i][j] = #9 then
-          lx += OptTabSize
-        else
-          lx += 1;
-      if (lx + 1 < pt.X) and not line.isEmpty then
-        pt.X:= lx + 1;
+      lx := strings.LinesUTF8[i].length - line.length + 1;
+      if (lx < pt.X) and not line.isEmpty then
+        pt.X:= lx;
       if (line.length > 1) and (line[1..2] = '//') then
         numUndo += 1;
     end;
+    e := rc.Height + 1;
     if numUndo = 0 then
       mustUndo := false
-    else if numUndo = Carets[0].EndY - CaretY then
+    else if numUndo = e then
       mustUndo := true;
     strings.BeginUndoGroup;
-    for i := caretY to Carets[0].EndY + 1 do
+    e := Carets[0].EndY + 1;
+    Carets[0].EndY := -1;
+    Carets[0].EndX := -1;
+    for i := rc.top to rc.bottom do
     begin
       pt.Y:= i;
       caretXY := pt;
@@ -1757,28 +1801,21 @@ var
   tok, tok1, tok2: PLexToken;
   cp, st, nd: TPoint;
   p0, p1: TPoint;
+  rc: TRect;
   sel: boolean;
 begin
   fLexToks.Clear;
   lex(Strings.TextString_UTF8, fLexToks, nil, [lxoNoComments]);
   cp := CaretXY;
-  if Carets[0].EndX <> -1 then
-  begin
-    sel := true;
-    st := caretXY;
-    nd := point(Carets[0].EndX + 1, Carets[0].EndY + 1);
-  end else
-  begin
-    sel := false;
-    st := Point(0,0);
-    nd := Point(0,0);
-  end;
+  sel:= hasSelection;
+  rc := normalizedSelRect;
+  strings.BeginUndoGroup;
   for i := fLexToks.Count-1 downto 2 do
   begin
     tok := PLexToken(fLexToks[i]);
 
-    if sel and ((tok^.position.Y < st.Y)
-      or (tok^.position.Y > nd.Y)) then
+    if sel and ((tok^.position.Y < rc.Top)
+      or (tok^.position.Y > rc.Bottom)) then
         continue;
     if ((tok^.Data <> 'all') and (tok^.Data <> 'none'))
       or (tok^.kind <> ltkIdentifier) or (i < 2) then
@@ -1790,24 +1827,22 @@ begin
     if  ((tok1^.kind = ltkKeyword) and (tok1^.data = 'version')
       and (tok2^.kind = ltkSymbol) and (tok2^.data = '(')) then
     begin
-      strings.BeginUndoGroup;
-      caretXY := tok^.position;
-      CaretY := CaretY-1;
+      CaretXY := tok^.position;
       case tok^.Data of
         'all':
         begin
-          strings.TextDeleteRange(CaretX, CaretY, CaretX + 3, CaretY, p0, p1);
-          strings.TextInsert(CaretX, CaretY, 'none', false, p0, p1);
+          strings.TextDeleteRange(CaretX, CaretY - 1, CaretX + 3, CaretY - 1, p0, p1);
+          strings.TextInsert(CaretX, CaretY - 1, 'none', false, p0, p1);
         end;
         'none':
         begin
-          strings.TextDeleteRange(CaretX, CaretY, CaretX + 4, CaretY, p0, p1);
-          strings.TextInsert(CaretX, CaretY, 'all', false, p0, p1);
+          strings.TextDeleteRange(CaretX, CaretY - 1, CaretX + 4, CaretY - 1, p0, p1);
+          strings.TextInsert(CaretX, CaretY - 1, 'all', false, p0, p1);
         end;
       end;
-      strings.EndUndoGroup;
     end;
   end;
+  strings.EndUndoGroup;
   CaretXY := cp;
 end;
 
@@ -1867,12 +1902,9 @@ var
   rac: string;
   idt: string = '';
   pos: integer;
-  len: integer;
-  sum: integer;
-  edt: TSynEdit;
   rng: TStringRange = (ptr:nil; pos:0; len: 0);
-  i: integer;
-  linelen: integer;
+  mem: TMemoryStream;
+  src: string;
   procedure errorMessage(const msg: string);
   begin
     // parameter for doc racine is a folder
@@ -1919,25 +1951,17 @@ begin
   // get the declaration name
   if pos <> -1 then
   begin
-    edt := TSynEdit.Create(nil);
-    edt.Lines.LoadFromFile(str);
-    sum := 0;
-    len := getLineEndingLength(str);
-    for i := 0 to edt.Lines.Count-1 do
-    begin
-      linelen := edt.Lines[i].length;
-      if sum + linelen + len > pos then
-      begin
-        edt.CaretY := i + 1;
-        edt.CaretX := pos - sum + len;
-        edt.SelectWord;
-        idt := '.html#.' + edt.SelText;
-        break;
-      end;
-      sum += linelen;
-      sum += len;
+    mem := TMemoryStream.Create;
+    try
+      mem.LoadFromFile(str);
+      setLength(src, mem.Size);
+      mem.Read(src[1], mem.Size);
+      rng.init(src);
+      rng.popFrontN(pos);
+      idt := '.html#.' + rng.nextWord;
+    finally
+      mem.free;
     end;
-    edt.Free;
   end;
   // guess the htm file + anchor
   rng.init(str);
@@ -2265,41 +2289,12 @@ begin
 end;
 
 procedure TCESynMemo.setSelectionOrWordCase(upper: boolean);
-var
-  i: integer;
-  txt: string;
+const
+  c: array[boolean] of integer = (cCommand_TextCaseLower, cCommand_TextCaseUpper);
 begin
-  //if SelAvail then
-  //begin
-  //  BeginUndoBlock;
-  //  case upper of
-  //    false: txt := UTF8LowerString(SelText);
-  //    true:  txt := UTF8UpperString(SelText);
-  //  end;
-  //  ExecuteCommand(ecBlockDelete, #0, nil);
-  //  for i:= 1 to txt.length do
-  //  case txt[i] of
-  //    #13: continue;
-  //    #10: ExecuteCommand(ecLineBreak, #0, nil);
-  //    else ExecuteCommand(ecChar, txt[i], nil);
-  //  end;
-  //  EndUndoBlock;
-  //end else
-  //begin
-  //  txt := GetWordAtRowCol(LogicalCaretXY);
-  //  if txt.isBlank then
-  //    exit;
-  //  BeginUndoBlock;
-  //  ExecuteCommand(ecWordLeft, #0, nil);
-  //  case upper of
-  //    false: txt := UTF8LowerString(txt);
-  //    true:  txt := UTF8UpperString(txt);
-  //  end;
-  //  ExecuteCommand(ecDeleteWord, #0, nil);
-  //  for i:= 1 to txt.length do
-  //    ExecuteCommand(ecChar, txt[i], nil);
-  //  EndUndoBlock;
-  //end;
+  strings.BeginUndoGroup;
+  DoCommand(c[upper]);
+  strings.EndUndoGroup;
 end;
 
 procedure TCESynMemo.sortSelectedLines(descending, caseSensitive: boolean);
