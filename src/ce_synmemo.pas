@@ -561,8 +561,8 @@ end;
 
 procedure TSortDialog.btnUndoClick(sender: TObject);
 begin
-  //if fCanUndo then
-  //  fEditor.undo;
+  if fCanUndo then
+    fEditor.DoCommand(cCommand_Undo);
   fCanUndo:= false;
 end;
 
@@ -2299,48 +2299,38 @@ end;
 
 procedure TCESynMemo.sortSelectedLines(descending, caseSensitive: boolean);
 var
-  i,j: integer;
-  lne: string;
-  lst: TStringListUTF8;
-  pt0: TPoint;
+  i: integer;
+  s: TStringListUTF8;
+  r: TRect;
 begin
-  //if BlockEnd.Y - BlockBegin.Y < 1 then
-  //  exit;
-  //lst := TStringListUTF8.Create;
-  //try
-  //  BeginUndoBlock;
-  //  for i:= BlockBegin.Y-1 to BlockEnd.Y-1 do
-  //    lst.Add(lines[i]);
-  //  pt0 := BlockBegin;
-  //  pt0.X:=1;
-  //  ExecuteCommand(ecGotoXY, #0, @pt0);
-  //  lst.CaseSensitive:=caseSensitive;
-  //  if not caseSensitive then
-  //    lst.Sorted:=true;
-  //  case descending of
-  //    false: for i:= 0 to lst.Count-1 do
-  //      begin
-  //        ExecuteCommand(ecDeleteLine, #0, nil);
-  //        ExecuteCommand(ecInsertLine, #0, nil);
-  //        lne := lst[i];
-  //        for j := 1 to lne.length do
-  //          ExecuteCommand(ecChar, lne[j], nil);
-  //        ExecuteCommand(ecDown, #0, nil);
-  //      end;
-  //    true: for i:= lst.Count-1 downto 0 do
-  //      begin
-  //        ExecuteCommand(ecDeleteLine, #0, nil);
-  //        ExecuteCommand(ecInsertLine, #0, nil);
-  //        lne := lst[i];
-  //        for j := 1 to lne.length do
-  //          ExecuteCommand(ecChar, lne[j], nil);
-  //        ExecuteCommand(ecDown, #0, nil);
-  //      end;
-  //  end;
-  //  EndUndoBlock;
-  //finally
-  //  lst.Free;
-  //end;
+  r := normalizedSelRect;
+  if r.height = 0 then
+    exit;
+  s := TStringListUTF8.Create;
+  try
+    strings.BeginUndoGroup;
+    for i := r.Top-1 to r.Bottom-1 do
+      s.Add(strings.LinesUTF8[i]);
+    s.CaseSensitive := caseSensitive;
+    if not caseSensitive then
+      s.Sorted:=true;
+    DoCommand(cCommand_TextDeleteSelection);
+    case descending of
+      true: for i:= 0 to s.Count-1 do
+      begin
+        DoCommand(cCommand_TextInsertEmptyAbove);
+        DoCommand(cCommand_TextInsert, s[i]);
+      end;
+      false: for i:= s.Count-1 downto 0 do
+      begin
+        DoCommand(cCommand_TextInsertEmptyAbove);
+        DoCommand(cCommand_TextInsert, s[i]);
+      end;
+    end;
+    strings.EndUndoGroup;
+  finally
+    s.free;
+  end;
 end;
 
 procedure TCESynMemo.sortLines;
