@@ -647,7 +647,7 @@ begin
   if fDoc.isNil then exit;
   //
   //macRecorder.Editor:= fDoc;
-  fDoc.PopupMenu := mnuEditor;
+  fDoc.PopupText := mnuEditor;
   fDoc.hideCallTips;
   fDoc.hideDDocs;
   if (pageControl.currentPage.Caption = '') or

@@ -988,6 +988,7 @@ begin
   OptSavingTrimSpaces:= true;
   OptSavingForceFinalEol:=false;
   OptAllowReadOnly:=true;
+  OptUndoGrouped:=true;
 
   fAutoCloseCurlyBrace:= autoCloseOnNewLineLexically;
   fAutoClosedPairs:= [autoCloseSquareBracket];
