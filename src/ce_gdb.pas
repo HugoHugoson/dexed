@@ -11,7 +11,8 @@ uses
   ObjectInspector,
   ce_common, ce_interfaces, ce_widget, ce_processes, ce_observer, ce_synmemo,
   ce_sharedres, ce_stringrange, ce_dsgncontrols, ce_dialogs, ce_dbgitf,
-  ce_ddemangle, ce_writableComponent, EditBtn, strutils, ce_controls;
+  ce_ddemangle, ce_writableComponent, EditBtn, strutils, ce_controls,
+  ce_gdbmi2json;
 
 type
 
@@ -472,7 +473,6 @@ type
     fDoc: TCESynMemo;
     fDbgRunnable: boolean;
     fProj: ICECommonProject;
-    fJson: TJsonObject;
     fLog: TStringList;
     fDocHandler: ICEMultiDocHandler;
     fMsg: ICEMessagesDisplay;
@@ -509,7 +509,7 @@ type
     // GDB output processors
     procedure gdboutQuiet(sender: TObject);
     procedure gdboutJsonize(sender: TObject);
-    procedure interpretJson;
+    procedure interpret(json: TJSONObject);
     // GDB commands & actions
     procedure gdbCommand(aCommand: string; gdbOutProcessor: TNotifyEvent = nil);
     procedure infoRegs;
@@ -1194,7 +1194,6 @@ begin
   fMsg:= getMessageDisplay;
   fLog := TStringList.Create;
   fInspState := TInspectableCPU.Create(@setGpr, @setSsr, @setFlag, @setFpr);
-  fJson := TJsonObject.Create;
   fStackItems := TStackItems.create;
   fSubj:= TCEDebugObserverSubject.Create;
   fOptions:= TCEDebugOptions.create(self);
@@ -1244,7 +1243,6 @@ begin
   fLog.Free;
   killGdb;
   fInspState.Free;
-  fJson.Free;
   fStackItems.Free;
   fSynchronizedDocuments.Free;
   EntitiesConnector.removeObserver(self);
@@ -1875,211 +1873,7 @@ end;
 {$ENDREGION}
 
 {$REGION GDB output processors -------------------------------------------------}
-procedure parseGdbout(const str: string; var json: TJSONObject);
-
-  procedure parseProperty(node: TJSONObject; r: PStringRange); forward;
-  procedure parseProperty(node: TJSONArray; r: PStringRange); forward;
-
-  procedure parseCLI(node: TJSONObject; r: PStringRange);
-  var
-    lne: TStringRange;
-    msg: string = '';
-  begin
-    if r^.front = '"' then
-      r^.popFront;
-    while true do
-    begin
-      lne := r^.takeUntil(['\', '"']);
-      if (r^.empty) then
-        break
-      else if r^.front = '\' then
-      begin
-        r^.popFront;
-        if r^.front = 'n' then
-        begin
-          r^.popFront;
-          node.Arrays['CLI'].Add(msg + lne.yield);
-          msg := '';
-        end else
-          msg += lne.yield;
-      end
-      else if r^.front = '"' then
-      begin
-        r^.popFront;
-        if r^.front = #10 then
-        begin
-          r^.popFront;
-          break;
-        end;
-      end;
-    end;
-  end;
-
-  procedure parseProperty(node: TJSONArray; r: PStringRange);
-  var
-    c: char;
-  begin
-    while true do
-    begin
-      if r^.empty then
-        exit;
-      c := r^.front;
-      case c of
-        'a'..'z':
-        begin
-          r^.takeUntil('=').yield;
-          r^.popFront;
-        end;
-        '"':
-        begin
-          r^.popFront;
-          node.Strings[node.Count] := r^.takeUntil('"').yield;
-          r^.popFront;
-        end;
-        '{':
-        begin
-          r^.popFront;
-          node.Objects[node.Count] := TJSONObject.Create;
-          parseProperty(node.Objects[node.Count-1], r);
-        end;
-        ']':
-        begin
-          r^.popFront;
-          exit;
-        end;
-        ',': r^.popFront;
-        #10:
-        begin
-          r^.popFront;
-          exit;
-        end;
-      end;
-    end;
-  end;
-
-  procedure parseProperty(node: TJSONObject; r: PStringRange);
-  var
-    idt: string = '';
-    v: string;
-    c: char;
-  begin
-    while true do
-    begin
-      if r^.empty then
-        exit;
-      c := r^.front;
-      case c of
-        ',':
-        begin
-          r^.popFront;
-        end;
-        'a'..'z':
-        begin
-          idt := r^.takeUntil('=').yield;
-          r^.popFront;
-        end;
-        '"':
-        begin
-          v := '';
-          r^.popFront;
-          while true do
-          begin
-            v += r^.takeUntil(['"','\']).yield;
-            if r^.front = '\' then
-            begin
-              v += '\';
-              r^.popFront;
-              if r^.front = '"' then
-              begin
-                r^.popFront;
-                v += '"';
-              end;
-            end else
-              break;
-          end;
-          node.Strings[idt] := v;
-          r^.popFront;
-        end;
-        '{':
-        begin
-          r^.popFront;
-          node.Objects[idt] := TJSONObject.Create;
-          parseProperty(node.Objects[idt], r);
-        end;
-        '[':
-        begin
-          r^.popFront;
-          node.Arrays[idt] := TJSONArray.Create;
-          parseProperty(node.Arrays[idt], r);
-        end;
-        '}', ']':
-        begin
-          r^.popFront;
-          exit;
-        end;
-        ' ', #9:
-          r^.popFront;
-        #10:
-        begin
-          r^.popFront;
-          exit;
-        end;
-      end;
-    end;
-  end;
-
-var
-  rng: TStringRange = (ptr: nil; pos: 0; len: 0);
-begin
-  json.Clear;
-  if str.length = 0 then
-    exit;
-  rng.init(str);
-  json.Arrays['OUT'] := TJSONArray.Create;
-  json.Arrays['CLI'] := TJSONArray.Create;
-  while true do
-  begin
-    if rng.empty then
-      exit;
-    case rng.front of
-      // event
-      '*':
-      begin
-        parseProperty(json, rng.popUntil(',')^.popFront);
-      end;
-      // command answer (can be a simple '^done')
-      '^':
-      begin
-        parseProperty(json, rng.popUntil([',', #10]));
-      end;
-      // what would be output in a console by gdb
-      '~':
-      begin
-        parseCLI(json, rng.popFront);
-      end;
-      // internal gdb messages
-      '&':
-      begin
-        parseCLI(json, rng.popFront);
-      end;
-      // async notify / status / out stream when remote (@)
-      '=', '+','@':
-      begin
-        rng.popUntil(#10);
-        if not rng.empty then
-          rng.popFront;
-      end
-      else
-      begin
-        rng.popUntil(#10);
-        if not rng.empty then
-          rng.popFront;
-      end;
-    end;
-  end;
-end;
-
-procedure TCEGdbWidget.interpretJson;
+procedure TCEGdbWidget.interpret(json: TJSONObject);
 
   procedure selectAsmInstr;
   var
@@ -2107,7 +1901,7 @@ procedure TCEGdbWidget.interpretJson;
 
 var
   r: shortint;
-  i,j: integer;
+  i,j, wx: integer;
   val: TJSONData;
   obj: TJSONObject;
   arr: TJSONArray;
@@ -2128,9 +1922,26 @@ var
   fpustr: string;
   fFpuExtended: extended;
   fFpuRaw: array[0..9] of Byte absolute fFpuExtended;
+
+  a: TJSONArray;
+  o: TJSONObject;
+  s: TJSONData;
+
+  result_class: string = '';
+
+
 begin
 
-  if fJson.findAny('reason', val) then
+  // "done" | "running" | "connected" | "error" | "exit"
+  if json.findArray('out-of-band-records', a) then
+    for wx:= 0 to a.Count -1 do
+  begin
+    if not assigned(a.Objects[wx]) then
+      continue;
+    o := a.Objects[wx];
+    if not assigned(o) then
+      continue;
+    if o.findAny('reason', val) then
   begin
     reason := val.AsString;
     r := stopReasons.match(reason);
@@ -2146,7 +1957,7 @@ begin
       end;
       if brkreason = dbWatch then
       begin
-        if fJson.findObject('wpt', obj) and obj.findAny('exp', val) then
+        if o.findObject('wpt', obj) and obj.findAny('exp', val) then
         begin
           if lstVariables.items.findCaption(val.AsString, k) then
           begin
@@ -2155,7 +1966,7 @@ begin
           end;
         end;
       end;
-      if fJson.findObject('frame', obj) then
+      if o.findObject('frame', obj) then
       begin
         if obj.FindAny('addr', val) then
           fLastOffset:=val.AsString;
@@ -2191,7 +2002,7 @@ begin
     begin
       signame := 'unknown signal';
       sigmean := 'unknown meaning';
-      if fJson.findAny('signal-name', val) then
+      if o.findAny('signal-name', val) then
         signame := val.AsString;
       if (fOptions.ignoredSignals.Count <> 0) and
         (fOptions.ignoredSignals.IndexOf(signame) <> -1) then
@@ -2199,9 +2010,9 @@ begin
         continueDebugging;
         exit;
       end;
-      if fJson.findAny('signal-meaning', val) then
+      if o.findAny('signal-meaning', val) then
         sigmean := val.AsString;
-      if fJson.findObject('frame', obj) then
+      if o.findObject('frame', obj) then
       begin
         if obj.findAny('addr', val) then
           fLastOffset:=val.AsString;
@@ -2247,217 +2058,223 @@ begin
       end;
     end
 
-    else if (reason = 'exited-normally') or (reason = 'exited-signalled')
-      or (reason = 'exited')
-    then
-    begin
-      application.BringToFront;
-      readOutput;
-      if not fOptions.showGdbOutput then
-        fMsg.message('debugging terminated: ' + reason, nil, amcMisc, amkInf);
-      setState(gsNone);
-      subjDebugStop(fSubj);
-      deleteRedirectedIO;
-      updateDebugeeOptionsEditor;
-      killGdb;
-    end;
-  end;
-
-  if fJson.findAny('msg', val) then
-    fMsg.message(val.AsString, nil, amcMisc, amkAuto);
-
-  if fJson.findArray('register-values', arr) then
-  begin
-    for i := 0 to arr.Count-1 do
-    begin
-      obj := TJSONObject(arr.Objects[i]);
-      if obj.isNil then
-        break;
-      if obj.findAny('number', val) then
-        number := val.AsInteger;
-      if obj.findAny('value', val) then
-      case number of
-        0..integer(high(TCpuRegister)):
-        begin
-          fInspState.CPU.setInspectableRegister
-            (TCpuRegister(number), {$IFDEF CPU64}val.AsQWord{$ELSE}val.AsInteger{$ENDIF});
-        end;
-        flagOffset:
-        begin
-          fInspState.setInspectableFlags({$IFDEF CPU64}val.AsInt64{$ELSE}val.AsInteger{$ENDIF});
-        end;
-        segOffset..segOffset+5:
-        begin
-          fInspState.SEG.setInspectableRegister
-            (TSegRegister(number - segOffset), val.AsInteger);
-        end;
-        stOffset..stOffset+7:
-        begin
-          fpustr := val.AsString;
-          fpustr := fpustr[3..fpustr.length];
-          if fpustr.length < 20 then
-          while fpustr.length < 20 do
-            fpustr += '0';
-          fFpuRaw[9] := StrToInt('$' + fpustr[1..2]);
-          fFpuRaw[8] := StrToInt('$' + fpustr[3..4]);
-          fFpuRaw[7] := StrToInt('$' + fpustr[5..6]);
-          fFpuRaw[6] := StrToInt('$' + fpustr[7..8]);
-          fFpuRaw[5] := StrToInt('$' + fpustr[9..10]);
-          fFpuRaw[4] := StrToInt('$' + fpustr[11..12]);
-          fFpuRaw[3] := StrToInt('$' + fpustr[13..14]);
-          fFpuRaw[2] := StrToInt('$' + fpustr[15..16]);
-          fFpuRaw[1] := StrToInt('$' + fpustr[17..18]);
-          fFpuRaw[0] := StrToInt('$' + fpustr[19..20]);
-          fInspState.FPU.setInspectableRegister
-            (TFpuRegister(number - stOffset), fFpuExtended);
-        end;
-      end;
-      // TODO-cGDB: get SSE registers
-    end;
-    cpuViewer.RefreshPropertyValues;
-  end;
-
-  if fJson.findArray('stack', arr) then
-  begin
-    fStackItems.clear;
-    lstCallStack.Clear;
-    for i := 0 to arr.Count-1 do
-    begin
-      obj := arr.Objects[i];
-      if obj.isNil then
-        break;
-      val := obj.Find('fullname');
-      if val.isNotNil then
-        fLastFilename:= val.AsString;
-      val := obj.Find('func');
-      if val.isNotNil then
+      else if (reason = 'exited-normally') or (reason = 'exited-signalled')
+        or (reason = 'exited')
+      then
       begin
-        if fOptions.autoDemangle then
-          func:= demangle(val.AsString)
-        else
-          func := val.AsString;
+        application.BringToFront;
+        readOutput;
+        if not fOptions.showGdbOutput then
+          fMsg.message('debugging terminated: ' + reason, nil, amcMisc, amkInf);
+        setState(gsNone);
+        subjDebugStop(fSubj);
+        deleteRedirectedIO;
+        updateDebugeeOptionsEditor;
+        killGdb;
       end;
-      val := obj.Find('addr');
-      if val.isNotNil then
-        addr := val.AsInt64;
-      val := obj.Find('line');
-      if val.isNotNil then
-        line := val.AsInteger;
-      fStackItems.addItem(addr, fLastFilename, func, line);
-    end;
-    fStackItems.assignToList(lstCallStack);
+  end;
   end;
 
-  val := fJson.Find('variables');
-  if val.isNil then
-    val := fJson.Find('locals');
-  if val.isNotNil and (val.JSONType = jtArray) then
-  begin
-    j := lstVariables.ItemIndex;
-    lstVariables.BeginUpdate;
-    lstVariables.Clear;
-    arr := TJSONArray(val);
-    for i := 0 to arr.Count-1 do
+    if o.findAny('msg', val) then
+      fMsg.message(val.AsString, nil, amcMisc, amkAuto);
+
+    if o.findArray('register-values', arr) then
     begin
-      val := arr.Items[i];
-      if val.JSONType <> jtObject then
-        continue;
-      obj := TJSONObject(val);
-      val := obj.Find('name');
-      if val.isNil then
-        continue;
-      nme := val.AsString;
-      val := obj.Find('value');
-      if val.isNil then
-        continue;
-      lstVariables.AddItem(nme, nil);
-      with lstVariables.Items[lstVariables.Items.Count-1] do
-        SubItems.Add(val.AsString);
-    end;
-    if (j <> -1) and (j < lstVariables.Items.Count) then
-      lstVariables.ItemIndex := j;
-    lstVariables.EndUpdate;
-  end;
-
-  if fJson.findArray('asm_insns', arr) then
-  begin
-    lstAsm.BeginUpdate;
-    lstAsm.Clear;
-    for i := 0 to arr.Count-1 do
-    begin
-      obj := arr.Objects[i];
-      val := obj.Find('address');
-      if val.isNotNil then
-        nme := val.AsString;
-      //val := obj.Find('func-name');
-      //val := obj.Find('offset');
-      val := obj.Find('inst');
-      if val.isNotNil then
-      begin
-        lstAsm.AddItem(nme, nil);
-        if nme = fLastOffset then
-          lstAsm.Selected := lstAsm.Items[lstAsm.Items.Count-1];
-        if fOptions.autoDemangle then
-          lstAsm.Items[lstAsm.Items.Count-1].SubItems.Add(demangle(val.AsString))
-        else
-          lstAsm.Items[lstAsm.Items.Count-1].SubItems.Add(val.AsString);
-      end;
-    end;
-    if lstAsm.Selected.isNotNil then
-      lstAsm.Selected.MakeVisible(false);
-    lstAsm.EndUpdate;
-    selectAsmInstr;
-  end;
-
-  if fJson.findArray('threads', arr) then
-  begin
-    lstThreads.BeginUpdate;
-    lstThreads.Clear;
-    for i := 0 to arr.Count-1 do
-    begin
-      obj := arr.Objects[i];
-      if obj.findAny('id', val) then
-      begin
-        lstThreads.AddItem(val.AsString, nil);
-        k := lstThreads.Items[lstThreads.Items.Count-1];
-        if obj.findAny('state', val) then
-          k.SubItems.Add(val.AsString);
-        if obj.findAny('core', val) then
-          k.SubItems.Add(val.AsString);
-        val := obj.Find('frame');
-        if val.isNotNil and (val.JSONType = jtObject) then
-        begin
-          obj := TJSONObject(val);
-          if obj.findAny('func', val) then
-            if fOptions.autoDemangle then
-              k.SubItems.Add(demangle(val.AsString))
-            else
-              k.SubItems.Add(demangle(val.AsString));
-          if obj.findAny('addr', val) then
-            k.SubItems.Add(val.AsString);
-          if obj.findAny('fullname', val) then
-            k.SubItems.Add(val.AsString);
-          if obj.findAny('line', val) then
-            k.SubItems.Add(val.AsString);
-        end;
-      end;
-    end;
-    lstThreads.EndUpdate;
-  end;
-
-  if fOptions.showGdbOutput or fShowFromCustomCommand then
-  begin
-    fShowFromCustomCommand := false;
-    if fJson.findArray('CLI', arr) then
       for i := 0 to arr.Count-1 do
-        fMsg.message(arr.Strings[i], nil, amcMisc, amkAuto);
-  end;
+      begin
+        obj := TJSONObject(arr.Objects[i]);
+        if obj.isNil then
+          break;
+        if obj.findAny('number', val) then
+          number := val.AsInteger;
+        if obj.findAny('value', val) then
+        case number of
+          0..integer(high(TCpuRegister)):
+          begin
+            fInspState.CPU.setInspectableRegister
+              (TCpuRegister(number), {$IFDEF CPU64}val.AsQWord{$ELSE}val.AsInteger{$ENDIF});
+          end;
+          flagOffset:
+          begin
+            fInspState.setInspectableFlags({$IFDEF CPU64}val.AsInt64{$ELSE}val.AsInteger{$ENDIF});
+          end;
+          segOffset..segOffset+5:
+          begin
+            fInspState.SEG.setInspectableRegister
+              (TSegRegister(number - segOffset), val.AsInteger);
+          end;
+          stOffset..stOffset+7:
+          begin
+            fpustr := val.AsString;
+            fpustr := fpustr[3..fpustr.length];
+            if fpustr.length < 20 then
+            while fpustr.length < 20 do
+              fpustr += '0';
+            fFpuRaw[9] := StrToInt('$' + fpustr[1..2]);
+            fFpuRaw[8] := StrToInt('$' + fpustr[3..4]);
+            fFpuRaw[7] := StrToInt('$' + fpustr[5..6]);
+            fFpuRaw[6] := StrToInt('$' + fpustr[7..8]);
+            fFpuRaw[5] := StrToInt('$' + fpustr[9..10]);
+            fFpuRaw[4] := StrToInt('$' + fpustr[11..12]);
+            fFpuRaw[3] := StrToInt('$' + fpustr[13..14]);
+            fFpuRaw[2] := StrToInt('$' + fpustr[15..16]);
+            fFpuRaw[1] := StrToInt('$' + fpustr[17..18]);
+            fFpuRaw[0] := StrToInt('$' + fpustr[19..20]);
+            fInspState.FPU.setInspectableRegister
+              (TFpuRegister(number - stOffset), fFpuExtended);
+          end;
+        end;
+        // TODO-cGDB: get SSE registers
+      end;
+      cpuViewer.RefreshPropertyValues;
+    end;
+
+    if o.findArray('stack', arr) then
+    begin
+      fStackItems.clear;
+      lstCallStack.Clear;
+      for i := 0 to arr.Count-1 do
+      begin
+        obj := arr.Objects[i];
+        if obj.isNil then
+          break;
+        val := obj.Find('fullname');
+        if val.isNotNil then
+          fLastFilename:= val.AsString;
+        val := obj.Find('func');
+        if val.isNotNil then
+        begin
+          if fOptions.autoDemangle then
+            func:= demangle(val.AsString)
+          else
+            func := val.AsString;
+        end;
+        val := obj.Find('addr');
+        if val.isNotNil then
+          addr := val.AsInt64;
+        val := obj.Find('line');
+        if val.isNotNil then
+          line := val.AsInteger;
+        fStackItems.addItem(addr, fLastFilename, func, line);
+      end;
+      fStackItems.assignToList(lstCallStack);
+    end;
+
+    val := o.Find('variables');
+    if val.isNil then
+      val := o.Find('locals');
+    if val.isNotNil and (val.JSONType = jtArray) then
+    begin
+      j := lstVariables.ItemIndex;
+      lstVariables.BeginUpdate;
+      lstVariables.Clear;
+      arr := TJSONArray(val);
+      for i := 0 to arr.Count-1 do
+      begin
+        val := arr.Items[i];
+        if val.JSONType <> jtObject then
+          continue;
+        obj := TJSONObject(val);
+        val := obj.Find('name');
+        if val.isNil then
+          continue;
+        nme := val.AsString;
+        val := obj.Find('value');
+        if val.isNil then
+          continue;
+        lstVariables.AddItem(nme, nil);
+        with lstVariables.Items[lstVariables.Items.Count-1] do
+          SubItems.Add(val.AsString);
+      end;
+      if (j <> -1) and (j < lstVariables.Items.Count) then
+        lstVariables.ItemIndex := j;
+      lstVariables.EndUpdate;
+    end;
+
+    if o.findArray('asm_insns', arr) then
+    begin
+      lstAsm.BeginUpdate;
+      lstAsm.Clear;
+      for i := 0 to arr.Count-1 do
+      begin
+        obj := arr.Objects[i];
+        val := obj.Find('address');
+        if val.isNotNil then
+          nme := val.AsString;
+        //val := obj.Find('func-name');
+        //val := obj.Find('offset');
+        val := obj.Find('inst');
+        if val.isNotNil then
+        begin
+          lstAsm.AddItem(nme, nil);
+          if nme = fLastOffset then
+            lstAsm.Selected := lstAsm.Items[lstAsm.Items.Count-1];
+          if fOptions.autoDemangle then
+            lstAsm.Items[lstAsm.Items.Count-1].SubItems.Add(demangle(val.AsString))
+          else
+            lstAsm.Items[lstAsm.Items.Count-1].SubItems.Add(val.AsString);
+        end;
+      end;
+      if lstAsm.Selected.isNotNil then
+        lstAsm.Selected.MakeVisible(false);
+      lstAsm.EndUpdate;
+      selectAsmInstr;
+    end;
+
+    if o.findArray('threads', arr) then
+    begin
+      lstThreads.BeginUpdate;
+      lstThreads.Clear;
+      for i := 0 to arr.Count-1 do
+      begin
+        obj := arr.Objects[i];
+        if obj.findAny('id', val) then
+        begin
+          lstThreads.AddItem(val.AsString, nil);
+          k := lstThreads.Items[lstThreads.Items.Count-1];
+          if obj.findAny('state', val) then
+            k.SubItems.Add(val.AsString);
+          if obj.findAny('core', val) then
+            k.SubItems.Add(val.AsString);
+          val := obj.Find('frame');
+          if val.isNotNil and (val.JSONType = jtObject) then
+          begin
+            obj := TJSONObject(val);
+            if obj.findAny('func', val) then
+              if fOptions.autoDemangle then
+                k.SubItems.Add(demangle(val.AsString))
+              else
+                k.SubItems.Add(demangle(val.AsString));
+            if obj.findAny('addr', val) then
+              k.SubItems.Add(val.AsString);
+            if obj.findAny('fullname', val) then
+              k.SubItems.Add(val.AsString);
+            if obj.findAny('line', val) then
+              k.SubItems.Add(val.AsString);
+          end;
+        end;
+      end;
+      lstThreads.EndUpdate;
+    end;
+
+
+
+
+  //if fOptions.showGdbOutput or fShowFromCustomCommand then
+  //begin
+  //  fShowFromCustomCommand := false;
+  //  if json.findArray('CLI', arr) then
+  //    for i := 0 to arr.Count-1 do
+  //      fMsg.message(arr.Strings[i], nil, amcMisc, amkAuto);
+  //end;
 
 end;
 
 procedure TCEGdbWidget.gdboutJsonize(sender: TObject);
 var
-  str: string;
+  s: string;
+  o: TJSONObject;
+  m: TMemoryStream;
 begin
   if fMsg = nil then
     exit;
@@ -2465,16 +2282,34 @@ begin
   fLog.Clear;
   fGdb.getFullLines(fLog);
   if fOptions.showRawMiOutput then
-    for str in fLog do
-      fMsg.message(str, nil, amcMisc, amkAuto);
+    for s in fLog do
+      fMsg.message(s, nil, amcMisc, amkAuto);
 
   fCommandProcessed := true;
 
   if flog.Text.isEmpty then
     exit;
 
-  parseGdbout(fLog.Text, fJson);
-  interpretJson;
+  fLog.SaveToFile('/home/basile/b.txt');
+
+  o := gdbmi2json(fLog.Text);
+
+  s := o.FormatJSON();
+  m := TMemoryStream.Create;
+  try
+    m.Write(s[1], length(s));
+    m.SaveToFile('/home/basile/a.txt');
+  finally
+    m.Free;
+  end;
+
+  try
+    if assigned(o) then
+      interpret(o);
+  finally
+    o.free;
+  end;
+
 end;
 
 procedure TCEGdbWidget.readOutput;

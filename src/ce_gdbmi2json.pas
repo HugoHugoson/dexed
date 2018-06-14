@@ -1,4 +1,5 @@
 unit ce_gdbmi2json;
+
 {$I ce_defines.inc}
 
 interface
@@ -48,7 +49,10 @@ type
   TGdbMiNodeKind = (
     gnkLogStreamOutput,
     gnkTargetStreamOutput,
-    gnkConsoleStreamOutput
+    gnkConsoleStreamOutput,
+    gnkExecAsyncOutput,
+    gnkStatusAsyncOutput,
+    gnkNotifyAsyncOutput
   );
 
 (**
@@ -68,7 +72,7 @@ var
 
 procedure TTokenList.popFront();
 begin
-  dispose(Items[0]);
+  //dispose(Items[0]);
   Delete(0);
 end;
 
@@ -288,7 +292,7 @@ begin
   if tokens[0]^.kind <> TTokenKind.tkAnd then
     exit(nil);
   tokens.popFront();
-  if tokens[0]^.kind <> TTokenKind.tkToken then
+  if tokens[0]^.kind <> TTokenKind.tkString then
     exit(nil);
   s := tokens[0]^.text();
   tokens.popFront();
@@ -310,7 +314,7 @@ begin
   if tokens[0]^.kind <> TTokenKind.tkAt then
     exit(nil);
   tokens.popFront();
-  if tokens[0]^.kind <> TTokenKind.tkToken then
+  if tokens[0]^.kind <> TTokenKind.tkString then
     exit(nil);
   s := tokens[0]^.text();
   tokens.popFront();
@@ -332,7 +336,7 @@ begin
   if tokens[0]^.kind <> TTokenKind.tkTiddle then
     exit(nil);
   tokens.popFront();
-  if tokens[0]^.kind <> TTokenKind.tkToken then
+  if tokens[0]^.kind <> TTokenKind.tkString then
     exit(nil);
   s := tokens[0]^.text();
   tokens.popFront();
@@ -368,6 +372,7 @@ begin
     begin
       result := parseListValue(tokens);
     end;
+    else assert(false);
   end;
 end;
 
@@ -391,8 +396,7 @@ begin
   r := parseValue(tokens);
   if r = nil then
   begin
-    result.Free;
-    result := nil;
+    freeAndNil(result);
     exit;
   end;
   result.Items[0] := r;
@@ -402,16 +406,15 @@ begin
     r := parseValue(tokens);
     if r = nil then
     begin
-      result.Free;
-      result := nil;
+      freeAndNil(result);
       exit;
     end;
     result.Items[result.Count] := r;
   end;
   if tokens[0]^.kind <> tkRightSquare then
   begin
-    result.Free;
-    result := nil;
+    freeAndNil(result);
+    exit;
   end;
   tokens.popFront();
 end;
@@ -433,8 +436,7 @@ begin
   end;
   if not parseResult(tokens, result) then
   begin
-    result.Free;
-    result := nil;
+    freeAndNil(result);
     exit;
   end;
   while tokens[0]^.kind = tkComma do
@@ -442,15 +444,14 @@ begin
     tokens.popFront();
     if not parseResult(tokens, result) then
     begin
-      result.Free;
-      result := nil;
+      freeAndNil(result);
       exit;
     end;
   end;
   if tokens[0]^.kind <> tkRightCurly then
   begin
-    result.Free;
-    result := nil;
+    freeAndNil(result);
+    exit;
   end;
   tokens.popFront();
 end;
@@ -461,17 +462,15 @@ end;
 function parseResult(tokens: TTokenList; obj: TJSONObject): boolean;
 var
   v: TJSONData;
-  s: string;
+  s: ansistring;
 begin
   result := false;
   if tokens[0]^.kind <> TTokenKind.tkToken then
     exit;
-
   s := tokens[0]^.text();
   tokens.popFront();
   if tokens[0]^.kind <> TTokenKind.tkAss then
     exit;
-
   tokens.popFront();
   v := parseValue(tokens);
   if v = nil then
@@ -496,14 +495,14 @@ begin
   end;
   if tokens[0]^.kind <> TTokenKind.tkHat then
   begin
-    result.free;
-    exit(nil);
+    freeAndNil(result);
+    exit;
   end;
   tokens.popFront();
   if tokens[0]^.kind <> TTokenKind.tkToken then
   begin
-    result.free;
-    exit(nil);
+    freeAndNil(result);
+    exit;
   end;
   result['result-class'] := TJSONString.Create(tokens[0]^.text());
   tokens.popFront();
@@ -515,22 +514,56 @@ begin
     tokens.popFront();
     if not parseResult(tokens, r) then
     begin
-      result.free;
-      result := nil;
+      freeAndNil(result);
       exit;
     end;
   end;
 end;
 
 (**
- * BNF: async-record → exec-async-output | status-async-output | notify-async-output
+ * BNF: async-record → [ token ] ("*" | "+" | "=") async-class ( "," result )* nl
  *)
-function parseAsyncRecord(tokens: TTokenList): TJSonObject;
+function parseAsyncRecord(tokens: TTokenList): TJSONObject;
+var
+  r: TJSONObject;
 begin
-  //TODO-cGDB: parse async records
-  while tokens[0]^.kind <> tkNl do
+  result := TJSONObject.Create;
+  if tokens[0]^.kind = TTokenKind.tkToken then
+  begin
+    result['token'] := TJSONString.Create(tokens[0]^.text());
     tokens.popFront();
-  result := nil;
+  end;
+  case tokens[0]^.kind of
+    tkStar: result['type'] := TJSONIntegerNumber.Create(integer(gnkExecAsyncOutput));
+    tkPlus: result['type'] := TJSONIntegerNumber.Create(integer(gnkStatusAsyncOutput));
+    tkAss:  result['type'] := TJSONIntegerNumber.Create(integer(gnkNotifyAsyncOutput));
+  end;
+  tokens.popFront();
+  if tokens[0]^.kind <> TTokenKind.tkToken then
+  begin
+    freeAndNil(result);
+    exit;
+  end;
+  result['async-class'] := TJSONString.Create(tokens[0]^.text());
+  tokens.popFront();
+
+  r := TJSONObject.Create();
+  while tokens[0]^.kind = TTokenKind.tkComma do
+  begin
+    tokens.popFront();
+    if not parseResult(tokens, r) then
+    begin
+      freeAndNil(result);
+      exit;
+    end;
+  end;
+  if tokens[0]^.kind <> TTokenKind.tkNl then
+  begin
+    freeAndNil(result);
+    exit;
+  end;
+  tokens.popFront();
+  result['results'] := r;
 end;
 
 (**
@@ -580,7 +613,8 @@ end;
  *)
 function parseOutput(tokens: TTokenList): TJSonObject;
 var
-  a: TJSonArray;
+  a: TJSONArray;
+  o: TJSONObject;
 begin
   result := TJSonObject.Create;
   if outOfBandRecordBegins(tokens) then
@@ -588,7 +622,11 @@ begin
     a := TJSONArray.Create;
     result['out-of-band-records'] := a;
     while outOfBandRecordBegins(tokens) do
-      a.Items[a.Count] := parseOutOfBandRecord(tokens);
+    begin
+      o := parseOutOfBandRecord(tokens);
+      if assigned(o) then
+        a.Add(o);
+    end;
   end;
   if tokens[0]^.kind <> tkGdb then
   begin
@@ -596,21 +634,23 @@ begin
   end;
   if tokens[0]^.kind <> tkGdb then
   begin
-    result.Free;
-    result := nil;
+    //result.Free;
+    //result := nil;
   end;
   tokens.popFront();
-  if tokens[0]^.kind <> tkNl then
+  //assert(tokens.Count > 0);
+  //if tokens[0]^.kind <> tkNl then
   begin
-    result.Free;
-    result := nil;
+    //result.Free;
+    //result := nil;
   end;
-  tokens.popFront();
-  if tokens[0]^.kind <> tkEOF then
-  begin
-    result.Free;
-    result := nil;
-  end;
+  //tokens.popFront();
+  //assert(tokens.Count > 0);
+  //if tokens[0]^.kind <> tkEOF then
+  //begin
+  //  result.Free;
+  //  result := nil;
+  //end;
 end;
 
 function gdbmi2json(const str: string): TJSONObject;
