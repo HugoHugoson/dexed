@@ -11,15 +11,25 @@ unit TerminalCtrls;
 interface
 
 uses
-  Gtk2Term, Classes, SysUtils, Controls,
+  Gtk2Term, Classes, SysUtils, Controls, Forms, ExtCtrls,
   {$ifdef windows} windows, AsyncProcess,{$endif}
   Graphics, dialogs;
 
 type
 
-  TTerminal = class(TCustomControl)
+  TTerminal = class;
+
+  TWrappedTerminal = class(TCustomControl)
   private
-    FInfo: Pointer;
+    fTerminal: TTerminal;
+  public
+    constructor create(aOwner: TComponent); override;
+  end;
+
+  TTerminal = class(TScrollBox)
+  private
+    fWrapped: TWrappedTerminal;
+    fInfo: Pointer;
     {$ifdef hasgtk2term}
     fTerminalHanlde: PVteTerminal;
     {$endif}
@@ -38,6 +48,11 @@ type
     procedure setForegroundColor(value: TColor);
     procedure setSelectedColor(value: TColor);
     procedure setScrollBackLines(value: LongWord);
+    function getColumnCount: integer;
+    function getRowCount: integer;
+    function getCharHeight: integer;
+    function getCharWidth: integer;
+    procedure updateScrollbarsRanges;
   protected
     // Only used at design-time.
     procedure Paint; override;
@@ -138,7 +153,7 @@ var
   Info: PWidgetInfo;
 begin
   Info := PWidgetInfo(g_object_get_data(PGObject(Widget), 'widgetinfo'));
-  TTerminal(Info.LCLObject).DoTerminate;
+  TWrappedTerminal(Info.LCLObject).fTerminal.DoTerminate;
 end;
 
 procedure TerminalRefresh(Widget: PGtkWidget; user: Pointer); cdecl;
@@ -146,7 +161,7 @@ var
   Info: PWidgetInfo;
 begin
   Info := PWidgetInfo(g_object_get_data(PGObject(Widget), 'widgetinfo'));
-  TTerminal(Info.LCLObject).DoTerminalVisibleChanged;
+  TWrappedTerminal(Info.LCLObject).fTerminal.DoTerminalVisibleChanged;
 end;
 
 class procedure TGtk2WSTerminal.SetCallbacks(const AGtkWidget: PGtkWidget;
@@ -175,7 +190,7 @@ begin
   Info.Style := AParams.Style;
   Info.ExStyle := AParams.ExStyle;
   Info.WndProc := {%H-}PtrUInt(AParams.WindowClass.lpfnWndProc);
-  TTerminal(AWinControl).FInfo := Info;
+  TWrappedTerminal(AWinControl).fTerminal.fInfo := Info;
 
   { Configure core and client }
   gtk_frame_set_shadow_type(PGtkFrame(Info.CoreWidget), GTK_SHADOW_NONE);
@@ -188,7 +203,7 @@ begin
   else
   begin
     Info.ClientWidget := vte_terminal_new();
-    TTerminal(AWinControl).fTerminalHanlde := VTE_TERMINAL(Info.ClientWidget);
+    TWrappedTerminal(AWinControl).fTerminal.fTerminalHanlde := VTE_TERMINAL(Info.ClientWidget);
     vte_terminal_fork_command_full(VTE_TERMINAL(Info.ClientWidget), VTE_PTY_DEFAULT,
       nil, @Args[0], nil, G_SPAWN_SEARCH_PATH, nil, nil, nil, nil);
   end;
@@ -258,7 +273,9 @@ begin
   Args[0] := vte_get_user_shell();
   if Args[0] = nil then
     Args[0] := '/bin/bash';
-  Info := PWidgetInfo(FInfo);
+  Info := PWidgetInfo(fInfo);
+  if INfo = nil then
+    exit;
   gtk_widget_destroy(Info.ClientWidget);
   Info.ClientWidget := vte_terminal_new;
   fTerminalHanlde := VTE_TERMINAL(Info.ClientWidget);
@@ -301,6 +318,7 @@ begin
   if assigned(fTerminalHanlde) and assigned(vte_terminal_feed_child) then
     vte_terminal_feed_child(fTerminalHanlde, PChar(data + #10), data.Length + 1);
   {$endif}
+  updateScrollbarsRanges;
 end;
 
 procedure TTerminal.copyToClipboard();
@@ -317,6 +335,7 @@ begin
   if assigned(fTerminalHanlde) and assigned(vte_terminal_paste_clipboard) then
     vte_terminal_paste_clipboard(fTerminalHanlde);
   {$endif}
+  updateScrollbarsRanges;
 end;
 
 function TerminalAvailable: Boolean;
@@ -333,13 +352,26 @@ function RegisterTerminal: Boolean;
 begin
   Result := TerminalAvailable;
   if Result then
-    RegisterWSComponent(TTerminal, TGtk2WSTerminal);
+    RegisterWSComponent(TWrappedTerminal, TGtk2WSTerminal);
 end;
 {$endif}
+
+constructor TWrappedTerminal.create(aOwner: TComponent);
+begin
+  fTerminal := TTerminal(aOwner);
+  inherited create(aOwner);
+end;
 
 constructor TTerminal.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
+  HorzScrollBar.Visible:=true;
+  VertScrollBar.Visible:=true;
+  AutoScroll:=false;
+  fWrapped := TWrappedTerminal.create(self);
+  fWrapped.parent := self;
+  fWrapped.align := alClient;
+  fWrapped.BorderSpacing.Around:=8;
   Width := 300;
   Height := 200;
   fBackgroundColor:= clBlack;
@@ -348,6 +380,13 @@ begin
   Font.Height:=11;
   Font.Name:='Monospace';
   fScrollbackLines:=4096;
+  with TPanel.create(self) do
+  begin
+    color := clRed;
+    align := alClient;
+    parent := self;
+
+  end;
 
   {$ifdef windows}
   fTermProgram := 'cmd.exe';
@@ -369,6 +408,52 @@ end;
 
 procedure TTerminal.Paint;
 begin
+  inherited;
+end;
+
+function TTerminal.getColumnCount: integer;
+begin
+  result := 0;
+  {$ifdef hasgtk2term}
+  if assigned(fTerminalHanlde) and assigned(vte_terminal_get_column_count) then
+    result := vte_terminal_get_column_count(fTerminalHanlde);
+  {$endif}
+end;
+
+function TTerminal.getRowCount: integer;
+begin
+  result := 0;
+  {$ifdef hasgtk2term}
+  if assigned(fTerminalHanlde) and assigned(vte_terminal_get_row_count) then
+    result := vte_terminal_get_row_count(fTerminalHanlde);
+  {$endif}
+end;
+
+function TTerminal.getCharHeight: integer;
+begin
+  result := 0;
+  {$ifdef hasgtk2term}
+  if assigned(fTerminalHanlde) and assigned(vte_terminal_get_char_height) then
+    result := vte_terminal_get_char_height(fTerminalHanlde);
+  {$endif}
+end;
+
+function TTerminal.getCharWidth: integer;
+begin
+  result := 0;
+  {$ifdef hasgtk2term}
+  if assigned(fTerminalHanlde) and assigned(vte_terminal_get_char_width) then
+    result := vte_terminal_get_char_width(fTerminalHanlde);
+{$endif}
+end;
+
+procedure TTerminal.updateScrollbarsRanges;
+begin
+  HorzScrollBar.Range := getColumnCount() * getCharWidth();
+  VertScrollBar.Range := getRowCount() * getCharHeight();
+  HorzScrollBar.Page  := width;
+  VertScrollBar.Page  := height;
+  UpdateScrollbars();
 end;
 
 procedure TTerminal.setScrollBackLines(value: LongWord);
@@ -377,11 +462,11 @@ var
   v: TGValue;
 begin
   fScrollbackLines:=value;
-  if not assigned(FInFo) then
+  if not assigned(fInfo) then
     exit;
   v.g_type:= G_TYPE_UINT;
   v.data[0].v_uint := fScrollbackLines;
-  g_object_set_property(PGObject(PWidgetInfo(FInfo).ClientWidget), 'scrollback-lines', @v);
+  g_object_set_property(PGObject(PWidgetInfo(fInfo).ClientWidget), 'scrollback-lines', @v);
 {$else}
 begin
 {$endif}
@@ -452,6 +537,7 @@ begin
   end;
   {$pop}
   {$endif}
+  updateScrollbarsRanges;
 end;
 
 {$ifdef hasgtk2term}

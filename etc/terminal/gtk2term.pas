@@ -98,6 +98,10 @@ var
 
   vte_terminal_get_column_count: function(terminal: PVteTerminal): glong; cdecl;
 
+  vte_terminal_get_char_height: function(terminal: PVteTerminal): glong; cdecl;
+
+  vte_terminal_get_char_width: function(terminal: PVteTerminal): glong; cdecl;
+
 function Gtk2TermLoad: Boolean;
 
 implementation
@@ -152,7 +156,10 @@ begin
     'vte_terminal_get_row_count');
   @vte_terminal_get_column_count:= GetProcAddress(Lib,
     'vte_terminal_get_column_count');
-
+  @vte_terminal_get_char_height:= GetProcAddress(Lib,
+    'vte_terminal_get_char_height');
+  @vte_terminal_get_char_width:= GetProcAddress(Lib,
+    'vte_terminal_get_char_width');
   // assume all or none
   Loaded := @vte_terminal_new <> nil;
 
