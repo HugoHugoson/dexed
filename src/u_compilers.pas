@@ -765,7 +765,7 @@ begin
   {$IFDEF DARWIN}
   if '/usr/local/bin/dmd'.fileExists then
     fPaths.DmdExeName:='/usr/local/bin/dmd';
-  if '/Library/D/dmd/src/druntime/import' then
+  if '/Library/D/dmd/src/druntime/import'.dirExists then
     fPaths.DmdRuntimePath:='/Library/D/dmd/src/druntime/import';
   if '/Library/D/dmd/src/phobos'.dirExists then
     fPaths.DmdPhobosPath:='/Library/D/dmd/src/phobos';
